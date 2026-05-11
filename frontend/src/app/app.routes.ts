@@ -1,13 +1,21 @@
 import { Routes } from '@angular/router';
+import { authGuard } from './shared/guards/auth.guard';
 
 export const routes: Routes = [
   {
+    path: 'login',
+    loadComponent: () =>
+      import('./login/login.component').then((m) => m.LoginComponent),
+  },
+  {
     path: '',
+    canActivate: [authGuard],
     loadComponent: () =>
       import('./home/home.component').then((m) => m.HomeComponent),
   },
   {
     path: 'playground',
+    canActivate: [authGuard],
     loadComponent: () =>
       import('./playground/components/chat-playground/chat-playground.component').then(
         (m) => m.ChatPlaygroundComponent
@@ -15,6 +23,7 @@ export const routes: Routes = [
   },
   {
     path: 'admin',
+    canActivate: [authGuard],
     loadComponent: () =>
       import('./admin/admin-shell.component').then((m) => m.AdminShellComponent),
     children: [

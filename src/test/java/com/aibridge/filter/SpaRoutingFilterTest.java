@@ -31,7 +31,7 @@ class SpaRoutingFilterTest {
         SpaRoutingFilter filter = new SpaRoutingFilter();
         filter.init(router);
 
-        verify(router).getWithRegex(eq("^/(?:playground|admin(?:/(?:health|load-test))?)/?$"));
+        verify(router).getWithRegex(eq("^/(?:login|playground|admin(?:/(?:health|load-test))?)/?$"));
 
         RoutingContext ctx = mock(RoutingContext.class);
         captor.getValue().handle(ctx);

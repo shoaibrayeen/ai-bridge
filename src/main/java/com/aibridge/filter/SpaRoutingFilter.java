@@ -8,7 +8,7 @@ import jakarta.enterprise.event.Observes;
 public class SpaRoutingFilter {
 
     void init(@Observes Router router) {
-        router.getWithRegex("^/(?:playground|admin(?:/(?:health|load-test))?)/?$")
+        router.getWithRegex("^/(?:login|playground|admin(?:/(?:health|load-test))?)/?$")
                 .handler(ctx -> ctx.reroute("/index.html"));
     }
 }

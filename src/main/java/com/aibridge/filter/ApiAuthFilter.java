@@ -13,8 +13,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Protects {@code /v1/*} endpoints (chat completions) with bearer-token authentication.
- * Admin and internal UI APIs are not protected — auth is only for external API consumers.
+ * Protects {@code /v1/*} and {@code /admin/api/*} endpoints with bearer-token
+ * authentication. The auth endpoint ({@code /api/auth/token}) is excluded.
  */
 @Provider
 @Priority(Priorities.AUTHENTICATION)
@@ -45,7 +45,8 @@ public class ApiAuthFilter implements ContainerRequestFilter {
 
     private static boolean requiresAuth(String path) {
         String p = path.startsWith("/") ? path.substring(1) : path;
-        return p.startsWith("v1/") || p.equals("v1");
+        return p.startsWith("v1/") || p.equals("v1")
+                || p.startsWith("admin/api/") || p.equals("admin/api");
     }
 
     private static Response unauthorized() {

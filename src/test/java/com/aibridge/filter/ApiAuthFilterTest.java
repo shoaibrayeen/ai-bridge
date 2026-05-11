@@ -62,26 +62,6 @@ class ApiAuthFilterTest {
     }
 
     @Test
-    void filter_adminApiPath_doesNotRequireAuth() {
-        when(ctx.getUriInfo()).thenReturn(uriInfo);
-        when(uriInfo.getPath()).thenReturn("/admin/api/llm-configs");
-
-        filter.filter(ctx);
-
-        verify(ctx, never()).abortWith(any());
-    }
-
-    @Test
-    void filter_adminApiExactPath_doesNotRequireAuth() {
-        when(ctx.getUriInfo()).thenReturn(uriInfo);
-        when(uriInfo.getPath()).thenReturn("/admin/api");
-
-        filter.filter(ctx);
-
-        verify(ctx, never()).abortWith(any());
-    }
-
-    @Test
     void filter_optionsPreflight_allowed() {
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(uriInfo.getPath()).thenReturn("/v1/chat/completions");
@@ -110,6 +90,34 @@ class ApiAuthFilterTest {
     void filter_v1ExactPath_noAuthHeader_returns401() {
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(uriInfo.getPath()).thenReturn("/v1");
+        when(ctx.getMethod()).thenReturn("GET");
+        when(ctx.getHeaderString("Authorization")).thenReturn(null);
+
+        filter.filter(ctx);
+
+        ArgumentCaptor<Response> captor = ArgumentCaptor.forClass(Response.class);
+        verify(ctx).abortWith(captor.capture());
+        assertEquals(401, captor.getValue().getStatus());
+    }
+
+    @Test
+    void filter_adminApiPath_noAuthHeader_returns401() {
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(uriInfo.getPath()).thenReturn("/admin/api/llm-configs");
+        when(ctx.getMethod()).thenReturn("GET");
+        when(ctx.getHeaderString("Authorization")).thenReturn(null);
+
+        filter.filter(ctx);
+
+        ArgumentCaptor<Response> captor = ArgumentCaptor.forClass(Response.class);
+        verify(ctx).abortWith(captor.capture());
+        assertEquals(401, captor.getValue().getStatus());
+    }
+
+    @Test
+    void filter_adminApiExactPath_noAuthHeader_returns401() {
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(uriInfo.getPath()).thenReturn("/admin/api");
         when(ctx.getMethod()).thenReturn("GET");
         when(ctx.getHeaderString("Authorization")).thenReturn(null);
 
@@ -150,7 +158,7 @@ class ApiAuthFilterTest {
     }
 
     @Test
-    void filter_validToken_allows() {
+    void filter_validToken_v1_allows() {
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(uriInfo.getPath()).thenReturn("/v1/chat/completions");
         when(ctx.getMethod()).thenReturn("POST");
@@ -163,10 +171,23 @@ class ApiAuthFilterTest {
     }
 
     @Test
+    void filter_validToken_adminApi_allows() {
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(uriInfo.getPath()).thenReturn("/admin/api/health");
+        when(ctx.getMethod()).thenReturn("GET");
+        when(ctx.getHeaderString("Authorization")).thenReturn("Bearer good-token");
+        when(apiAuthService.validateToken("good-token")).thenReturn(true);
+
+        filter.filter(ctx);
+
+        verify(ctx, never()).abortWith(any());
+    }
+
+    @Test
     void filter_validTokenCaseInsensitiveBearer_allows() {
         when(ctx.getUriInfo()).thenReturn(uriInfo);
-        when(uriInfo.getPath()).thenReturn("/v1/chat/completions");
-        when(ctx.getMethod()).thenReturn("POST");
+        when(uriInfo.getPath()).thenReturn("/admin/api/health");
+        when(ctx.getMethod()).thenReturn("GET");
         when(ctx.getHeaderString("Authorization")).thenReturn("BEARER my-token");
         when(apiAuthService.validateToken("my-token")).thenReturn(true);
 
@@ -185,5 +206,16 @@ class ApiAuthFilterTest {
         filter.filter(ctx);
 
         verify(ctx).abortWith(any());
+    }
+
+    @Test
+    void filter_adminApiOptionsPreflightAllowed() {
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(uriInfo.getPath()).thenReturn("/admin/api/llm-configs");
+        when(ctx.getMethod()).thenReturn("OPTIONS");
+
+        filter.filter(ctx);
+
+        verify(ctx, never()).abortWith(any());
     }
 }
