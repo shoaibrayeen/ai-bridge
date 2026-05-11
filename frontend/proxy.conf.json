@@ -1,0 +1,5 @@
+{
+  "/v1": { "target": "http://localhost:8080", "secure": false },
+  "/admin/api": { "target": "http://localhost:8080", "secure": false },
+  "/q": { "target": "http://localhost:8080", "secure": false }
+}

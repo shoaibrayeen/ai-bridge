@@ -1,0 +1,44 @@
+# --- Java / Maven ---
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+hs_err_pid*
+replay_pid*
+
+# --- IntelliJ IDEA ---
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# --- Eclipse ---
+.classpath
+.project
+.settings/
+
+# --- VS Code / Cursor ---
+.vscode/
+.cursor/
+
+# --- Node / Angular ---
+node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/.sass-cache/
+
+# --- Quarkus bundled frontend output ---
+src/main/resources/META-INF/resources/
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Environment / secrets ---
+.env
+.env.*
+*.pem
+*.key
