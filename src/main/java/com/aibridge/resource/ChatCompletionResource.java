@@ -26,6 +26,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.stream.Stream;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -33,6 +37,7 @@ import java.util.regex.Pattern;
 @Path("/v1/chat/completions")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Completions", description = "OpenAI-compatible chat completions")
 public class ChatCompletionResource {
 
     private static final Pattern SAFE_HEADER = Pattern.compile("^[a-zA-Z0-9_-]+$");
@@ -47,9 +52,33 @@ public class ChatCompletionResource {
     public static final String HEADER_INCLUDE_LINEAGE = "X-Include-Lineage";
 
     @POST
+    @Operation(
+            summary = "Create a chat completion",
+            description = """
+                    OpenAI Chat Completions format. Two ways to choose the LLM:
+
+                    1. **Feature routing (default).** Send `X-Feature` (and optionally \
+                    `X-Tenant-ID`). The `model` field in the body is ignored — the model comes \
+                    from the database. The request walks an ordered failover chain: tenant \
+                    primary, tenant fallback, global primary, global fallback.
+                    2. **Model pinning.** Put a gateway model name (`ai-bridge-<n>-<model>`, from \
+                    `GET /v1/models`) in the `model` field. That selects exactly one config, \
+                    `X-Feature` becomes optional, and no failover happens.
+
+                    Set `"stream": true` for a `text/event-stream` of \
+                    `chat.completion.chunk` frames terminated by `data: [DONE]`.
+                    """)
+    @APIResponse(responseCode = "200", description = "Completion, or an SSE stream when stream=true")
+    @APIResponse(responseCode = "400", description = "X-Feature missing, or a malformed header")
+    @APIResponse(responseCode = "401", description = "Missing or expired bearer token")
+    @APIResponse(responseCode = "404", description = "No active config for this tenant and feature")
+    @APIResponse(responseCode = "502", description = "Every config in the failover chain was exhausted")
     public Response complete(
+            @Parameter(description = "Tenant whose configuration to use. Omit for the global config.", example = "acme")
             @HeaderParam("X-Tenant-ID") String tenantId,
+            @Parameter(description = "Feature label that selects the failover chain. Required unless model names a gateway config.", example = "chat")
             @HeaderParam("X-Feature") String feature,
+            @Parameter(description = "Set to true to include the routing trail and per-attempt token detail in the response.", example = "true")
             @HeaderParam(HEADER_INCLUDE_LINEAGE) String includeLineage,
             @Valid ChatCompletionRequest request) {
         // A gateway model name in the payload selects a config on its own, so X-Feature is only

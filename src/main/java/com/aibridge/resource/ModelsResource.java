@@ -14,6 +14,10 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -26,6 +30,7 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 @Path("/v1/models")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Models", description = "Discover the gateway model names you can call")
 public class ModelsResource {
 
     private static final Pattern SAFE_HEADER = Pattern.compile("^[a-zA-Z0-9_-]+$");
@@ -34,7 +39,18 @@ public class ModelsResource {
     LlmConfigRepository llmConfigRepository;
 
     @GET
-    public Response listModels(@HeaderParam("X-Tenant-ID") String tenantId) {
+    @Operation(
+            summary = "List available models",
+            description = """
+                    Every gateway model name this tenant may send in the `model` field, in the \
+                    standard OpenAI list envelope. Scoped to the tenant's own configs plus the \
+                    global ones. `root` is the provider's own model name behind the gateway id.
+                    """)
+    @APIResponse(responseCode = "200", description = "List of models")
+    @APIResponse(responseCode = "400", description = "Malformed X-Tenant-ID")
+    public Response listModels(
+            @Parameter(description = "Tenant to scope the listing to. Omit for global configs only.", example = "acme")
+            @HeaderParam("X-Tenant-ID") String tenantId) {
         if (tenantId != null && !tenantId.isBlank() && !SAFE_HEADER.matcher(tenantId).matches()) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "Invalid X-Tenant-ID header"))
@@ -49,8 +65,16 @@ public class ModelsResource {
 
     @GET
     @Path("/{model}")
+    @Operation(
+            summary = "Retrieve one model",
+            description = "A config owned by another tenant returns 404, identically to one that does not exist.")
+    @APIResponse(responseCode = "200", description = "The model")
+    @APIResponse(responseCode = "404", description = "No such model for this tenant")
     public Response getModel(
-            @HeaderParam("X-Tenant-ID") String tenantId, @PathParam("model") String model) {
+            @Parameter(description = "Tenant scope", example = "acme")
+            @HeaderParam("X-Tenant-ID") String tenantId,
+            @Parameter(description = "Gateway model name", example = "ai-bridge-1-claude-sonnet-6")
+            @PathParam("model") String model) {
         if (tenantId != null && !tenantId.isBlank() && !SAFE_HEADER.matcher(tenantId).matches()) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "Invalid X-Tenant-ID header"))

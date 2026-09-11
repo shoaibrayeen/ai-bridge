@@ -15,12 +15,17 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import java.util.Map;
 
 @ApplicationScoped
 @Path("/api/auth")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Auth", description = "Exchange an API key for a bearer token")
 public class AuthResource {
 
     @Inject
@@ -34,6 +39,19 @@ public class AuthResource {
 
     @POST
     @Path("/token")
+    @Operation(
+            summary = "Exchange an API key for a bearer token",
+            description = """
+                    The only unauthenticated endpoint. Send `{"api_key": "..."}` and receive an \
+                    opaque bearer token to use on every other call.
+
+                    Failed attempts are counted per caller: after 10 failures in 5 minutes the \
+                    caller is refused even with the correct key. A locked-out caller and a wrong \
+                    key return the same 401.
+                    """)
+    @APIResponse(responseCode = "200", description = "Token issued")
+    @APIResponse(responseCode = "400", description = "api_key missing from the body")
+    @APIResponse(responseCode = "401", description = "Invalid API key, or the caller is locked out")
     public Response generateToken(AuthRequest request) {
         if (request == null || request.getApiKey() == null || request.getApiKey().isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST)

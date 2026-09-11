@@ -9,12 +9,17 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @ApplicationScoped
 @Path("/admin/api/health")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Admin: Health", description = "Database and cache health")
 public class HealthResource {
 
     @Inject

@@ -2,6 +2,7 @@ package com.aibridge.exception;
 
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -52,9 +53,45 @@ public class GlobalExceptionMapper implements ExceptionMapper<Throwable> {
                     summary.isEmpty() ? "Validation failed" : summary, details);
         }
 
+        if (exception instanceof WebApplicationException e) {
+            // JAX-RS already decided the status — a 404 for an unknown path, a 405 for a wrong
+            // method. Collapsing those into 500 both lies to the caller and buries real failures
+            // under SEVERE noise from every bot that probes an unknown URL.
+            int status = e.getResponse() == null
+                    ? Response.Status.INTERNAL_SERVER_ERROR.getStatusCode()
+                    : e.getResponse().getStatus();
+            if (status >= 500) {
+                LOG.log(Level.SEVERE, "Server error", e);
+            } else if (LOG.isLoggable(Level.FINE)) {
+                LOG.log(Level.FINE, "Client error " + status, e);
+            }
+            return json(status, typeFor(status), clientSafeMessage(e, status), null);
+        }
+
         LOG.log(Level.SEVERE, "Unhandled error", exception);
         return json(Response.Status.INTERNAL_SERVER_ERROR, "InternalError",
                 "Internal server error", null);
+    }
+
+    private static String typeFor(int status) {
+        return switch (status) {
+            case 400 -> "BadRequest";
+            case 401 -> "Unauthorized";
+            case 403 -> "Forbidden";
+            case 404 -> "NotFound";
+            case 405 -> "MethodNotAllowed";
+            case 406 -> "NotAcceptable";
+            case 415 -> "UnsupportedMediaType";
+            default -> status >= 500 ? "ServerError" : "ClientError";
+        };
+    }
+
+    /** A 5xx message can carry internals, so only client errors echo their own text. */
+    private static String clientSafeMessage(WebApplicationException e, int status) {
+        if (status >= 500) {
+            return "Internal server error";
+        }
+        return safeMessage(e);
     }
 
     private static String safeMessage(Throwable t) {

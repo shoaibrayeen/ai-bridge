@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIBridge API Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+:root{
+  --ground:#f3f5f8; --surface:#ffffff; --surface-2:#e9edf2; --sunk:#eef1f5;
+  --ink:#121820; --ink-2:#4a5663; --ink-3:#74808d;
+  --rule:#d6dce4; --rule-2:#c2cad4;
+  --accent:#0b656f; --accent-2:#0e8794; --accent-soft:#dceef0;
+  --ok:#2b6b46; --ok-soft:#dcece3;
+  --warn:#8d5606; --warn-soft:#f3e7d4;
+  --crit:#9e2b22; --crit-soft:#f5e0dd;
+  --shadow:0 1px 2px rgba(18,24,32,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0c1116; --surface:#141b22; --surface-2:#1c252e; --sunk:#101820;
+    --ink:#e3e9ef; --ink-2:#a2aeba; --ink-3:#77838f;
+    --rule:#27323d; --rule-2:#35424f;
+    --accent:#54c6d2; --accent-2:#7adae4; --accent-soft:#11333a;
+    --ok:#6cc491; --ok-soft:#14291f;
+    --warn:#d7a25c; --warn-soft:#2b2115;
+    --crit:#ee8b80; --crit-soft:#2e1a18;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0c1116; --surface:#141b22; --surface-2:#1c252e; --sunk:#101820;
+  --ink:#e3e9ef; --ink-2:#a2aeba; --ink-3:#77838f;
+  --rule:#27323d; --rule-2:#35424f;
+  --accent:#54c6d2; --accent-2:#7adae4; --accent-soft:#11333a;
+  --ok:#6cc491; --ok-soft:#14291f;
+  --warn:#d7a25c; --warn-soft:#2b2115;
+  --crit:#ee8b80; --crit-soft:#2e1a18;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+  font-size:16px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1220px;margin:0 auto;padding:0 28px 96px}
+
+/* ---------- masthead ---------- */
+.mast{border-bottom:1px solid var(--rule);padding:56px 0 28px;margin-bottom:40px}
+.eyebrow{
+  font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 14px
+}
+h1{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;
+  font-weight:700;font-size:clamp(34px,5vw,52px);line-height:1.04;
+  letter-spacing:-.022em;margin:0 0 16px;text-wrap:balance;max-width:16ch
+}
+.standfirst{font-size:19px;line-height:1.55;color:var(--ink-2);max-width:62ch;margin:0}
+.facts{
+  display:flex;flex-wrap:wrap;gap:0;margin-top:32px;
+  border:1px solid var(--rule);border-radius:3px;background:var(--surface);overflow:hidden
+}
+.fact{flex:1 1 150px;padding:13px 18px;border-right:1px solid var(--rule)}
+.fact:last-child{border-right:0}
+.fact dt{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin:0 0 3px
+}
+.fact dd{margin:0;font-family:Archivo,sans-serif;font-weight:600;font-size:15px;color:var(--ink)}
+
+/* ---------- layout ---------- */
+.cols{display:block}
+@media (min-width:1060px){
+  .cols{display:grid;grid-template-columns:190px minmax(0,1fr);gap:56px;align-items:start}
+  .toc{position:sticky;top:28px}
+}
+.toc{margin-bottom:44px}
+.toc p{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 10px
+}
+.toc ol{list-style:none;margin:0;padding:0;counter-reset:t}
+.toc li{counter-increment:t;margin:0 0 2px}
+.toc a{
+  display:block;padding:4px 0 4px 26px;position:relative;
+  font-family:Archivo,sans-serif;font-size:13px;font-weight:500;line-height:1.35;
+  color:var(--ink-2);text-decoration:none;border-radius:2px
+}
+.toc a::before{
+  content:counter(t,decimal-leading-zero);position:absolute;left:0;
+  font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ink-3)
+}
+.toc a:hover{color:var(--accent)}
+.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- sections ---------- */
+section{margin:0 0 64px;scroll-margin-top:24px}
+h2{
+  font-family:Archivo,sans-serif;font-weight:600;font-size:26px;letter-spacing:-.012em;
+  margin:0 0 6px;padding-top:10px;border-top:2px solid var(--ink);color:var(--ink);text-wrap:balance
+}
+h3{
+  font-family:Archivo,sans-serif;font-weight:600;font-size:16px;letter-spacing:-.004em;
+  margin:34px 0 10px;color:var(--ink)
+}
+.kicker{
+  font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 20px
+}
+p{max-width:68ch;margin:0 0 15px}
+ul,ol{max-width:68ch;padding-left:20px}
+li{margin-bottom:7px}
+strong{font-weight:600}
+a{color:var(--accent)}
+code{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.855em;
+  background:var(--sunk);border:1px solid var(--rule);border-radius:3px;
+  padding:.08em .34em;color:var(--ink)
+}
+
+/* ---------- tables ---------- */
+.scroller{overflow-x:auto;margin:18px 0 8px;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-family:Archivo,sans-serif;font-size:13.5px;line-height:1.45}
+th{
+  text-align:left;font-weight:600;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);padding:10px 14px;border-bottom:1px solid var(--rule-2);white-space:nowrap;
+  background:var(--surface-2)
+}
+td{padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td:first-child{color:var(--ink);font-weight:500}
+td code,th code{font-size:12px;background:none;border:0;padding:0;color:inherit}
+.mono td:first-child{font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:400}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.pill{
+  display:inline-block;font-family:"JetBrains Mono",monospace;font-size:10px;
+  letter-spacing:.04em;padding:2px 7px;border-radius:2px;white-space:nowrap;border:1px solid
+}
+.p-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.p-warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.p-crit{background:var(--crit-soft);color:var(--crit);border-color:var(--crit)}
+.p-acc{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+
+/* ---------- figures ---------- */
+figure{margin:26px 0;padding:0}
+figure svg{display:block;width:100%;max-width:100%;height:auto;color:var(--ink-2)}
+.figframe{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:20px 18px;overflow-x:auto}
+figcaption{
+  font-family:Archivo,sans-serif;font-size:12.5px;line-height:1.5;color:var(--ink-3);
+  margin-top:11px;max-width:70ch
+}
+figcaption b{color:var(--ink-2);font-weight:600}
+
+/* svg vocabulary */
+.b{fill:var(--surface);stroke:var(--rule-2);stroke-width:1.25}
+.b-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.25}
+.b-s{fill:var(--surface-2);stroke:var(--rule-2);stroke-width:1.25}
+.b-ok{fill:var(--ok-soft);stroke:var(--ok);stroke-width:1.25}
+.b-w{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.25}
+.b-x{fill:var(--crit-soft);stroke:var(--crit);stroke-width:1.25}
+.b-net{fill:none;stroke:var(--rule-2);stroke-width:1.25;stroke-dasharray:5 4}
+.t{fill:var(--ink);font-family:Archivo,sans-serif;font-size:12.5px;font-weight:600}
+.ts{fill:var(--ink-2);font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:400}
+.tl{fill:var(--ink-3);font-family:"JetBrains Mono",monospace;font-size:9.5px}
+.tn{fill:var(--accent);font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:500}
+.l{stroke:var(--ink-3);stroke-width:1.25;fill:none}
+.l-a{stroke:var(--accent);stroke-width:1.5;fill:none}
+.l-ok{stroke:var(--ok);stroke-width:1.5;fill:none}
+.l-x{stroke:var(--crit);stroke-width:1.5;fill:none;stroke-dasharray:5 3}
+.l-w{stroke:var(--warn);stroke-width:1.5;fill:none;stroke-dasharray:5 3}
+.h{fill:var(--ink-3)}.h-a{fill:var(--accent)}.h-ok{fill:var(--ok)}.h-x{fill:var(--crit)}.h-w{fill:var(--warn)}
+
+/* ---------- callout ---------- */
+.note{
+  border-left:3px solid var(--accent);background:var(--surface);
+  padding:14px 18px;margin:22px 0;border-radius:0 3px 3px 0;box-shadow:var(--shadow)
+}
+.note p{margin:0;font-size:15px;color:var(--ink-2)}
+.note p + p{margin-top:9px}
+
+pre{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.6;
+  background:var(--sunk);border:1px solid var(--rule);border-radius:3px;
+  padding:14px 16px;overflow-x:auto;margin:18px 0;color:var(--ink-2)
+}
+pre b{color:var(--ink);font-weight:500}
+
+footer{
+  border-top:1px solid var(--rule);margin-top:56px;padding-top:20px;
+  font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ink-3)
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<style>
+/* ---------- endpoint blocks ---------- */
+.ep{border:1px solid var(--rule);border-radius:3px;background:var(--surface);margin:20px 0;overflow:hidden}
+.ep-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;background:var(--surface-2);border-bottom:1px solid var(--rule)}
+.verb{font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:500;letter-spacing:.06em;
+      padding:3px 8px;border-radius:2px;border:1px solid;white-space:nowrap}
+.v-get{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.v-post{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.v-put{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.v-delete{background:var(--crit-soft);color:var(--crit);border-color:var(--crit)}
+.ep-path{font-family:"JetBrains Mono",monospace;font-size:13.5px;color:var(--ink);font-weight:500;
+         word-break:break-all}
+.ep-auth{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:9.5px;color:var(--ink-3);
+         text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+.ep-body{padding:14px 16px}
+.ep-body > :first-child{margin-top:0}
+.ep-body > :last-child{margin-bottom:0}
+.ep-body p{font-size:15px}
+.ep-body h4{font-family:Archivo,sans-serif;font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+            color:var(--ink-3);margin:18px 0 7px;font-weight:600}
+.ep-body pre{margin:0 0 12px}
+.req{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:10px;margin-left:5px}
+
+/* ---------- link cards ---------- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:22px 0}
+.card{display:block;border:1px solid var(--rule);border-radius:3px;background:var(--surface);
+      padding:15px 17px;text-decoration:none;color:inherit;box-shadow:var(--shadow)}
+.card:hover{border-color:var(--accent)}
+.card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.card b{display:block;font-family:Archivo,sans-serif;font-size:15px;font-weight:600;color:var(--ink);margin-bottom:4px}
+.card span{font-family:Archivo,sans-serif;font-size:12.5px;color:var(--ink-3);line-height:1.45}
+.card code{font-size:11px}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">API reference</p>
+  <h1>AIBridge API</h1>
+  <p class="standfirst">One OpenAI-shaped door in front of five LLM providers. Every request and response on this page is copy-pasteable &mdash; replace <code>$TOKEN</code> with the bearer token from the first call.</p>
+  <dl class="facts">
+    <div class="fact"><dt>Base URL</dt><dd>http://localhost:8080</dd></div>
+    <div class="fact"><dt>Auth</dt><dd>Bearer token</dd></div>
+    <div class="fact"><dt>Format</dt><dd>OpenAI-compatible</dd></div>
+    <div class="fact"><dt>Streaming</dt><dd>SSE</dd></div>
+  </dl>
+
+  <div class="cards">
+    <a class="card" href="/q/swagger-ui" target="_blank" rel="noopener">
+      <b>Swagger UI &rarr;</b>
+      <span>Interactive explorer. Authorize once, then call any endpoint from the browser.</span>
+    </a>
+    <a class="card" href="/q/openapi" target="_blank" rel="noopener">
+      <b>OpenAPI schema &rarr;</b>
+      <span>The raw document, for client generation. Add <code>?format=json</code> for JSON.</span>
+    </a>
+    <a class="card" href="/q/health" target="_blank" rel="noopener">
+      <b>Health probes &rarr;</b>
+      <span>SmallRye liveness and readiness, including the database and cache.</span>
+    </a>
+  </div>
+</header>
+
+<div class="cols">
+
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#start">Quick start</a></li>
+    <li><a href="#auth">Auth</a></li>
+    <li><a href="#completions">Chat completions</a></li>
+    <li><a href="#streaming">Streaming</a></li>
+    <li><a href="#lineage">Lineage</a></li>
+    <li><a href="#models">Models</a></li>
+    <li><a href="#providers">Admin: providers</a></li>
+    <li><a href="#configs">Admin: configs</a></li>
+    <li><a href="#ops">Admin: features, load test, health</a></li>
+    <li><a href="#errors">Errors</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============ 1 ============ -->
+<section id="start">
+  <h2>Quick start</h2>
+  <p class="kicker">Three calls, end to end</p>
+
+  <p>Exchange your API key for a token, find out which models you can call, then call one. Everything under <code>/v1</code> and <code>/admin/api</code> needs the token; <code>POST /api/auth/token</code> is the only open endpoint.</p>
+
+<pre><b># 1. Get a token</b>
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"api_key": "YOUR_AIBRIDGE_API_KEY"}' | jq -r .token)
+
+<b># 2. See what you can call</b>
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Tenant-ID: acme' | jq
+
+<b># 3. Call it</b>
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Tenant-ID: acme' \
+  -H 'X-Feature: chat' \
+  -H 'Content-Type: application/json' \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}' | jq</pre>
+
+  <h3>The two headers that decide routing</h3>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Header</th><th>Required</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>X-Feature</code></td><td>Yes, unless <code>model</code> names a gateway config</td><td>Selects the failover chain. A label you define, e.g. <code>chat</code>, <code>summarization</code></td></tr>
+        <tr><td><code>X-Tenant-ID</code></td><td>No</td><td>Prefers this tenant's configs over the global ones. Omit to use global only</td></tr>
+        <tr><td><code>X-Request-ID</code></td><td>No</td><td>Your correlation id. Generated if absent; always echoed back</td></tr>
+        <tr><td><code>X-Include-Lineage</code></td><td>No</td><td><code>true</code> returns the routing trail in the response body</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <p><strong>Your consumers hold one credential.</strong> They present the AIBridge API key and get a bearer token. Provider keys (OpenAI, Anthropic, AWS, IBM) stay encrypted in the gateway's database and are never exposed through any endpoint &mdash; admin reads return a mask.</p>
+  </div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="auth">
+  <h2>Auth</h2>
+  <p class="kicker">One open endpoint</p>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-post">POST</span>
+      <span class="ep-path">/api/auth/token</span>
+      <span class="ep-auth">no auth</span>
+    </div>
+    <div class="ep-body">
+      <p>Exchanges the static API key for an opaque bearer token.</p>
+
+      <h4>Request body</h4>
+<pre>{
+  "api_key": "YOUR_AIBRIDGE_API_KEY"
+}</pre>
+
+      <h4>200 &mdash; Response</h4>
+<pre>{
+  "token": "bd9591b0-61b2-48dc-8d74-88a802b6d4b0",
+  "expires_in_minutes": 60
+}</pre>
+
+      <h4>Then, on every other call</h4>
+<pre>Authorization: Bearer bd9591b0-61b2-48dc-8d74-88a802b6d4b0</pre>
+
+      <h4>Errors</h4>
+      <div class="scroller">
+        <table class="mono">
+          <tbody>
+            <tr><td><span class="pill p-warn">400</span></td><td><code>api_key</code> missing or blank</td></tr>
+            <tr><td><span class="pill p-crit">401</span></td><td>Wrong key &mdash; <em>or</em> the caller is locked out</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <p><strong>Brute-force limiting.</strong> Failures are counted per caller for 5 minutes. After 10, the caller is refused even with the correct key, and the lockout window is rolling &mdash; a persistent attacker never ages out of it. A locked-out caller and a wrong key return an identical 401, so probing reveals nothing.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="completions">
+  <h2>Chat completions</h2>
+  <p class="kicker">The endpoint your application calls</p>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-post">POST</span>
+      <span class="ep-path">/v1/chat/completions</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Standard OpenAI Chat Completions format in and out.</p>
+
+      <h4>Request body</h4>
+<pre>{
+  "messages": [
+    {"role": "system",  "content": "You are concise."},
+    {"role": "user",    "content": "Explain token buckets in one sentence."}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 200,
+  "top_p": 1,
+  "stream": false
+}</pre>
+
+      <h4>Body fields</h4>
+      <div class="scroller">
+        <table class="mono">
+          <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>messages<span class="req">required</span></td><td>array</td><td>Each item is <code>{"role": "system"|"user"|"assistant", "content": "..."}</code></td></tr>
+            <tr><td>model</td><td>string</td><td>Ignored unless it is a gateway model name &mdash; see below</td></tr>
+            <tr><td>stream</td><td>boolean</td><td><code>true</code> switches the response to SSE</td></tr>
+            <tr><td>temperature</td><td>number</td><td rowspan="7">Optional. Your value wins; otherwise the config's stored default is used; otherwise the field is omitted entirely so the provider applies its own default</td></tr>
+            <tr><td>max_tokens</td><td>integer</td></tr>
+            <tr><td>top_p</td><td>number</td></tr>
+            <tr><td>n</td><td>integer</td></tr>
+            <tr><td>stop</td><td>array</td></tr>
+            <tr><td>presence_penalty</td><td>number</td></tr>
+            <tr><td>frequency_penalty</td><td>number</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>200 &mdash; Response</h4>
+<pre>{
+  "id": "chatcmpl-9c1f...",
+  "object": "chat.completion",
+  "created": 1789151540,
+  "model": "ai-bridge-1-claude-sonnet-6",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "A token bucket refills at a fixed rate..."},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {"prompt_tokens": 41, "completion_tokens": 96, "total_tokens": 137}
+}</pre>
+
+      <p><code>model</code> in the response is always the <em>gateway</em> name, never the provider's. Send that value back in a later request and you reach the same config.</p>
+    </div>
+  </div>
+
+  <h3>Choosing the LLM</h3>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th><code>model</code> in the body</th><th>What happens</th><th>Failover</th></tr></thead>
+      <tbody>
+        <tr><td>Absent, or a provider name like <code>gpt-4o</code></td><td>Ignored. Routed by <code>X-Tenant-ID</code> &times; <code>X-Feature</code></td><td><span class="pill p-ok">Yes</span> full chain</td></tr>
+        <tr><td>A gateway name like <code>ai-bridge-2-claude-sonnet-6</code></td><td>Pinned to exactly that config. <code>X-Feature</code> becomes optional</td><td><span class="pill p-crit">No</span> you asked for one</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>OpenAI SDKs require a non-empty <code>model</code>, so sending a provider name is safe &mdash; it simply falls through to feature routing rather than erroring.</p>
+
+<pre><b># Feature routing — walks the failover chain</b>
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Tenant-ID: acme' -H 'X-Feature: chat' \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+
+<b># Pinned to one config — no failover</b>
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Tenant-ID: acme' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"ai-bridge-2-claude-sonnet-6",
+       "messages":[{"role":"user","content":"Hello"}]}'</pre>
+
+  <h3>The failover chain</h3>
+  <p>Feature routing resolves an ordered chain and walks it. Three conditions advance to the next link:</p>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Order</th><th>Config</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>Tenant primary &mdash; lowest <code>priority</code> wins</td></tr>
+        <tr><td class="num">2</td><td>Tenant fallback</td></tr>
+        <tr><td class="num">3</td><td>Global primary</td></tr>
+        <tr><td class="num">4</td><td>Global fallback</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Condition</th><th>Advances?</th></tr></thead>
+      <tbody>
+        <tr><td>Waited past the config's <code>queue_timeout_ms</code> for a pacing slot</td><td><span class="pill p-warn">Yes</span></td></tr>
+        <tr><td>Provider returned <code>429</code></td><td><span class="pill p-warn">Yes</span></td></tr>
+        <tr><td>Provider returned <code>5xx</code> or timed out</td><td><span class="pill p-warn">Yes</span></td></tr>
+        <tr><td>Provider answered <code>200</code> with no content</td><td><span class="pill p-ok">No</span> &mdash; returned to you as 200 with empty content</td></tr>
+        <tr><td>Misconfiguration, e.g. a bad encryption key</td><td><span class="pill p-crit">No</span> &mdash; it would fail identically on every config, so the error is raised</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>If every link is exhausted, the gateway returns <span class="pill p-crit">502</span>.</p>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="streaming">
+  <h2>Streaming</h2>
+  <p class="kicker">Server-sent events</p>
+
+  <p>Set <code>"stream": true</code>. The response becomes <code>text/event-stream</code> &mdash; one <code>data:</code> line per chunk, terminated by <code>data: [DONE]</code>.</p>
+
+<pre>curl -N http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Feature: chat' -H 'Content-Type: application/json' \
+  -d '{"stream": true, "messages": [{"role":"user","content":"Hello"}]}'</pre>
+
+  <h4>Response</h4>
+<pre>data: {"id":"chatcmpl-x","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+data: {"id":"chatcmpl-x","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{"content":"Hel"}}]}
+
+data: {"id":"chatcmpl-x","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{"content":"lo"}}]}
+
+data: {"id":"chatcmpl-x","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]</pre>
+
+  <p>Streaming works against <strong>every</strong> provider, but the experience differs:</p>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Providers</th><th>Behaviour</th></tr></thead>
+      <tbody>
+        <tr><td>OpenAI, Cerebras, Claude</td><td><span class="pill p-ok">Native</span> tokens forwarded as the provider emits them</td></tr>
+        <tr><td>watsonx.ai, Bedrock</td><td><span class="pill p-warn">Buffered</span> the gateway makes the blocking call and emits the answer as one content chunk</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Both produce an identical, well-formed stream &mdash; your client needs no branching. The difference is time to first token.</p>
+
+  <div class="note">
+    <p><strong>Failover stops at the first byte.</strong> Acquiring a pacing slot and getting the provider to start answering are retried down the chain. Once the first chunk has reached you, bytes are on the wire and there is no honest way to switch providers, so a mid-stream failure ends the stream.</p>
+    <p><strong>Token counts arrive last.</strong> <code>usage</code> rides on the terminating chunk.</p>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="lineage">
+  <h2>Lineage</h2>
+  <p class="kicker">Which providers were tried, and what each cost</p>
+
+  <p>Every completion records the path it took. It is always written to the log against the request id; send <code>X-Include-Lineage: true</code> to get it in the response body too, under <code>x_aibridge_lineage</code>.</p>
+
+<pre>curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Feature: chat' -H 'X-Include-Lineage: true' \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'</pre>
+
+<pre>"x_aibridge_lineage": {
+  "request_id": "8f3c1e20-...",
+  "tenant_id": "acme",
+  "feature": "chat",
+  "routing": "feature",
+  "chain_length": 2,
+  "attempts": [
+    {"sequence": 1, "gateway_model_name": "ai-bridge-1-gpt-4o",
+     "model_name": "gpt-4o", "provider": "OPENAI",
+     "outcome": "QUEUE_TIMEOUT", "duration_ms": 5001,
+     "detail": "..."},
+    {"sequence": 2, "gateway_model_name": "ai-bridge-1-claude-sonnet-6",
+     "model_name": "claude-sonnet-6", "provider": "CLAUDE",
+     "outcome": "SUCCESS", "duration_ms": 812,
+     "prompt_tokens": 41, "completion_tokens": 96, "total_tokens": 137}
+  ],
+  "total_duration_ms": 5813,
+  "billed_total_tokens": 137
+}</pre>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>outcome</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>SUCCESS</td><td>Provider answered with usable content</td></tr>
+        <tr><td>EMPTY_RESPONSE</td><td>Answered 200 with no content &mdash; returned to you as-is</td></tr>
+        <tr><td>QUEUE_TIMEOUT</td><td>No pacing slot within the config's timeout</td></tr>
+        <tr><td>RATE_LIMITED</td><td>Provider returned 429</td></tr>
+        <tr><td>UNAVAILABLE</td><td>Provider returned 5xx, or the call timed out</td></tr>
+        <tr><td>NO_ADAPTER</td><td>No adapter registered for that provider</td></tr>
+        <tr><td>ERROR</td><td>Misconfiguration or bug &mdash; recorded, logged and raised, never failed over</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><code>billed_total_tokens</code> sums <em>every</em> attempt, not just the successful one, so tokens burned by a provider that later failed over stay visible.</p>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="models">
+  <h2>Models</h2>
+  <p class="kicker">OpenAI-compatible discovery</p>
+
+  <p>Each config gets a service-wide unique name, <code>ai-bridge-&lt;sequence&gt;-&lt;model&gt;</code>. The sequence counts up per model, which is what lets the same model be registered more than once &mdash; two Claude Sonnet 6 configs with different keys or rate limits become <code>ai-bridge-1-claude-sonnet-6</code> and <code>ai-bridge-2-claude-sonnet-6</code>.</p>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-get">GET</span>
+      <span class="ep-path">/v1/models</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Every model this tenant may call: its own configs plus the global ones.</p>
+      <h4>200 &mdash; Response</h4>
+<pre>{
+  "object": "list",
+  "data": [
+    {
+      "id": "ai-bridge-1-claude-sonnet-6",
+      "object": "model",
+      "created": 1789151540,
+      "owned_by": "claude",
+      "root": "claude-sonnet-6",
+      "features": ["chat"]
+    },
+    {
+      "id": "ai-bridge-2-claude-sonnet-6",
+      "object": "model",
+      "created": 1789151540,
+      "owned_by": "claude",
+      "root": "claude-sonnet-6",
+      "features": ["summarization"]
+    }
+  ]
+}</pre>
+      <p><code>root</code> is the provider's own model name behind the gateway id. <code>features</code> is an AIBridge extension; OpenAI clients ignore it.</p>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-get">GET</span>
+      <span class="ep-path">/v1/models/{gateway-model-name}</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>One model. A config owned by another tenant returns <span class="pill p-warn">404</span>, identical to one that does not exist &mdash; you cannot probe for other tenants' configuration.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="providers">
+  <h2>Admin: providers</h2>
+  <p class="kicker">Register a provider type once</p>
+
+  <p>A provider row says <em>how</em> to authenticate. Configs point at it.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th><code>auth_type</code></th><th>Credentials you store on the config</th><th>What the gateway does</th></tr></thead>
+      <tbody>
+        <tr><td><code>API_KEY</code></td><td><code>{"api_key": "sk-..."}</code></td><td>Sends it directly &mdash; <code>Authorization: Bearer</code>, or <code>x-api-key</code> for Claude</td></tr>
+        <tr><td><code>IAM_TOKEN</code></td><td><code>{"api_key": "..."}</code> + <code>extra_params.project_id</code></td><td>Exchanges the key at <code>auth_endpoint</code> for a bearer token, caches it until it nears expiry</td></tr>
+        <tr><td><code>AWS_SIGV4</code></td><td><code>{"access_key_id": "...", "secret_access_key": "...", "session_token": "..."}</code> + <code>extra_params.region</code></td><td>Signs each request with SigV4; nothing cached, every signature is request-specific</td></tr>
+        <tr><td><code>OAUTH2</code></td><td>&mdash;</td><td>Reserved in the schema; no adapter uses it yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-post">POST</span>
+      <span class="ep-path">/admin/api/llm-providers</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <h4>Request body</h4>
+<pre>{
+  "name": "WATSONX",
+  "auth_type": "IAM_TOKEN",
+  "auth_endpoint": "https://iam.cloud.ibm.com/identity/token"
+}</pre>
+      <p><code>name</code> must be one of <code>OPENAI</code>, <code>CEREBRAS</code>, <code>CLAUDE</code>, <code>WATSONX</code>, <code>BEDROCK</code> &mdash; uppercase. <code>auth_endpoint</code> is only needed for <code>IAM_TOKEN</code>.</p>
+      <h4>201 &mdash; Response</h4>
+<pre>{
+  "id": "7c2f9a10-...",
+  "name": "WATSONX",
+  "auth_type": "IAM_TOKEN",
+  "auth_endpoint": "https://iam.cloud.ibm.com/identity/token"
+}</pre>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-get">GET</span>
+      <span class="ep-path">/admin/api/llm-providers</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body"><p>All providers. <code>GET /{id}</code> for one, <code>PUT /{id}</code> to update, <code>DELETE /{id}</code> to remove.</p></div>
+  </div>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="configs">
+  <h2>Admin: configs</h2>
+  <p class="kicker">Where models, credentials and rate limits live</p>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-post">POST</span>
+      <span class="ep-path">/admin/api/llm-configs</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Creates a config. The gateway makes a <strong>real completion call</strong> to the provider before persisting anything &mdash; a wrong key, a wrong region or a nonexistent model comes back as <span class="pill p-warn">422</span> with the provider's own message, rather than failing at your first real request.</p>
+
+      <h4>Request body</h4>
+<pre>{
+  "tenant_id": "acme",
+  "provider_id": "7c2f9a10-...",
+  "model_name": "claude-sonnet-6",
+  "endpoint_url": "https://api.anthropic.com/v1/messages",
+  "credentials": "{\"api_key\": \"sk-ant-...\"}",
+  "features": ["chat", "summarization"],
+
+  "rps_limit": 5,
+  "rpm_limit": 200,
+  "tpm_limit": 100000,
+  "queue_timeout_ms": 5000,
+
+  "default_temperature": 0.7,
+  "default_max_tokens": 1024,
+  "default_top_p": 1.0,
+
+  "is_fallback": false,
+  "priority": 0,
+  "extra_params": "{\"project_id\": \"...\"}"
+}</pre>
+
+      <h4>Fields</h4>
+      <div class="scroller">
+        <table class="mono">
+          <thead><tr><th>Field</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>provider_id<span class="req">required</span></td><td>From <code>GET /admin/api/llm-providers</code></td></tr>
+            <tr><td>model_name<span class="req">required</span></td><td>The provider's own name. The gateway name is derived from it</td></tr>
+            <tr><td>endpoint_url<span class="req">required</span></td><td>Must pass the SSRF allowlist. HTTPS outside dev</td></tr>
+            <tr><td>credentials<span class="req">required</span></td><td>JSON <em>string</em>, shape depends on <code>auth_type</code>. Encrypted with AES-256-GCM before storage</td></tr>
+            <tr><td>tenant_id</td><td>Omit for a global config every tenant can use</td></tr>
+            <tr><td>features</td><td>Labels callers send in <code>X-Feature</code></td></tr>
+            <tr><td>rps_limit / rpm_limit / tpm_limit</td><td>Null means unlimited. Each creates its own token bucket</td></tr>
+            <tr><td>queue_timeout_ms</td><td>How long a request waits for a slot before failing over. Default 5000</td></tr>
+            <tr><td>default_*</td><td>Used when the caller omits that parameter</td></tr>
+            <tr><td>is_fallback</td><td><code>true</code> places this after the primaries in the chain</td></tr>
+            <tr><td>priority</td><td>Lower wins among configs at the same level</td></tr>
+            <tr><td>extra_params</td><td>JSON string. <code>project_id</code> for watsonx, <code>region</code> for Bedrock</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>201 &mdash; Response</h4>
+<pre>{
+  "id": "3f9a2c41-...",
+  "model_name": "claude-sonnet-6",
+  "gateway_model_name": "ai-bridge-1-claude-sonnet-6",
+  "tenant_id": "acme",
+  "provider_name": "CLAUDE",
+  "credentials": "****",
+  "features": ["chat", "summarization"],
+  "rps_limit": 5,
+  "is_active": true,
+  "created_at": "2026-09-12T04:12:00Z"
+}</pre>
+      <p>Note <code>gateway_model_name</code> &mdash; that is what callers put in the <code>model</code> field. Credentials come back masked, always.</p>
+
+      <h4>Errors</h4>
+      <div class="scroller">
+        <table class="mono">
+          <tbody>
+            <tr><td><span class="pill p-warn">400</span></td><td>Endpoint failed the SSRF allowlist, or plain HTTP outside dev</td></tr>
+            <tr><td><span class="pill p-warn">404</span></td><td><code>provider_id</code> does not exist</td></tr>
+            <tr><td><span class="pill p-warn">422</span></td><td>The live validation call to the provider failed &mdash; message included</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-post">POST</span>
+      <span class="ep-path">/admin/api/llm-configs/test</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Same body as create, but nothing is saved &mdash; a dry run to check credentials before committing.</p>
+<pre>{"valid": true, "latency_ms": 412}</pre>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-get">GET</span>
+      <span class="ep-path">/admin/api/llm-configs</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Filterable: <code>?tenant_id=acme&amp;feature=chat&amp;provider_id=...</code>. Credentials masked.</p>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-put">PUT</span>
+      <span class="ep-path">/admin/api/llm-configs/{id}</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Re-validates against the provider before saving. Send the masked <code>credentials</code> value back unchanged to keep the stored secret; send a new value to replace it.</p>
+      <p><strong>Changing <code>model_name</code> assigns a new gateway model name.</strong> Changing anything else leaves it alone, so clients pinning the name are not broken by an unrelated edit.</p>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-delete">DELETE</span>
+      <span class="ep-path">/admin/api/llm-configs/{id}</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Soft delete &mdash; sets <code>is_active = false</code>. The row and its encrypted credentials survive, so the config can be put back into rotation. Returns <span class="pill p-ok">204</span>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="ops">
+  <h2>Admin: features, load test, health</h2>
+  <p class="kicker">Operations</p>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-get">GET</span>
+      <span class="ep-path">/admin/api/features</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Distinct feature labels currently in use &mdash; the valid values for <code>X-Feature</code>.</p>
+<pre>["chat", "summarization", "code-gen"]</pre>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-post">POST</span>
+      <span class="ep-path">/admin/api/load-test</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Starts a load test. Returns <span class="pill p-ok">202</span> immediately with a run id; poll for results.</p>
+      <h4>Request body</h4>
+<pre>{
+  "tenant_id": "acme",
+  "feature": "chat",
+  "total_requests": 100,
+  "parallel": 10,
+  "prompt": "Say hello"
+}</pre>
+      <h4>202 &mdash; Response</h4>
+<pre>{"run_id": "b81c4f22-..."}</pre>
+      <p>Then <code>GET /admin/api/load-test/{run_id}</code> for progress and results, or <code>GET /admin/api/load-test</code> for recent runs. <code>parallel</code> is capped by <code>AIBRIDGE_LOAD_TEST_MAX_PARALLEL</code> (default 500).</p>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-head">
+      <span class="verb v-get">GET</span>
+      <span class="ep-path">/admin/api/health</span>
+      <span class="ep-auth">bearer</span>
+    </div>
+    <div class="ep-body">
+      <p>Database and cache health with measured latency. For unauthenticated probes suitable for Kubernetes, use <code>/q/health/live</code> and <code>/q/health/ready</code> instead.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="errors">
+  <h2>Errors</h2>
+  <p class="kicker">One envelope everywhere</p>
+
+  <p>Every error shares one shape, so a client can branch on <code>error.status</code> without parsing prose:</p>
+
+<pre>{
+  "error": {
+    "type": "ConfigNotFound",
+    "message": "No configuration found for tenant='acme' and feature='chat'",
+    "status": 404
+  }
+}</pre>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>status</th><th>type</th><th>Cause</th></tr></thead>
+      <tbody>
+        <tr><td class="num">400</td><td>BadRequest</td><td>Missing <code>X-Feature</code>, malformed header, or a disallowed endpoint URL</td></tr>
+        <tr><td class="num">400</td><td>ConstraintViolation</td><td>Body failed validation; the response lists each <code>violations[]</code> entry</td></tr>
+        <tr><td class="num">401</td><td>Unauthorized</td><td>Missing, invalid or expired bearer token</td></tr>
+        <tr><td class="num">404</td><td>ConfigNotFound</td><td>No active config for this tenant and feature, or an unknown gateway model name</td></tr>
+        <tr><td class="num">404</td><td>NotFound</td><td>No such path</td></tr>
+        <tr><td class="num">422</td><td>LlmValidation</td><td>The live validation call to the provider failed</td></tr>
+        <tr><td class="num">500</td><td>Encryption</td><td>Encryption key missing, wrong length, or rotated away from the stored data</td></tr>
+        <tr><td class="num">502</td><td>ProviderUnavailable</td><td>Every config in the failover chain was exhausted</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Every response carries <code>X-Request-ID</code>. Quote it when reporting a problem &mdash; the gateway logs the full routing lineage against it, including which providers were tried and why each failed.</p>
+</section>
+
+<footer>
+  AIBridge &middot; API reference &middot; <a href="/q/swagger-ui">Swagger UI</a> &middot; <a href="/q/openapi">OpenAPI schema</a>
+</footer>
+
+</main>
+</div>
+</div>
+</body>
+</html>

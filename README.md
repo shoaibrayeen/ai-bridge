@@ -35,10 +35,13 @@ ai-bridge/
   .env                             # Your local copy (git-ignored, never commit)
   Architecture.md                  # Full architecture & design document (source of truth)
   architecture.html                # Rendered architecture reference with flow diagrams
+  MEMORY.md                        # Project memory — long-term decisions, short-term state
   frontend/                        # Angular 21 SPA (admin + playground)
     package.json
     angular.json
     src/app/
+    src/assets/
+      api-documentation.html       # Static API reference, served at /api-docs
   src/
     main/
       java/com/aibridge/           # Quarkus backend source
@@ -134,6 +137,9 @@ java -jar target/quarkus-app/quarkus-run.jar
 | `http://localhost:8080/admin`| Admin Dashboard              |
 | `http://localhost:8080/admin/health` | Health Dashboard    |
 | `http://localhost:8080/admin/load-test` | Load Testing    |
+| `http://localhost:8080/api-docs` | **API reference** (payloads, curl examples) |
+| `http://localhost:8080/q/swagger-ui` | **Swagger UI** (interactive, try-it-out) |
+| `http://localhost:8080/q/openapi` | **OpenAPI schema** (YAML; `?format=json` for JSON) |
 | `http://localhost:8080/q/health` | SmallRye health probes   |
 
 ### Option 2: Angular Dev Server (Frontend Hot Reload)
@@ -259,6 +265,48 @@ Properties prefixed with `%docker.` are active when `QUARKUS_PROFILE=docker`:
 | `quarkus.http.cors.origins` | `QUARKUS_HTTP_CORS_ORIGINS` | `http://localhost:4200` |
 
 In production, set this to your actual frontend origin(s).
+
+## API Documentation
+
+The service ships its own documentation and serves it alongside the UI &mdash; no separate site to
+deploy, and it can never drift from the build it came from.
+
+| URL | What it is | Best for |
+|-----|------------|----------|
+| [`/api-docs`](http://localhost:8080/api-docs) | Static reference page with every endpoint, full request/response payloads and copy-pasteable `curl` examples | Reading, onboarding, sharing with consumers |
+| [`/q/swagger-ui`](http://localhost:8080/q/swagger-ui) | Swagger UI, generated from the code | Trying calls from the browser |
+| [`/q/openapi`](http://localhost:8080/q/openapi) | The OpenAPI 3.1 document (YAML; add `?format=json` for JSON) | Generating clients, importing into Postman/Insomnia |
+
+There is also an **API Docs** link in the app's top navigation.
+
+### Using Swagger UI
+
+1. Open [`/q/swagger-ui`](http://localhost:8080/q/swagger-ui)
+2. Call `POST /api/auth/token` with `{"api_key": "<your key>"}` and copy the `token`
+3. Click **Authorize**, paste the token, and every other endpoint becomes callable
+
+Operations are grouped by tag &mdash; Auth, Completions, Models, and the Admin groups &mdash; and
+each carries its parameters, status codes and schemas.
+
+### Generating a client
+
+```bash
+curl -s "http://localhost:8080/q/openapi?format=json" -o openapi.json
+
+npx @openapitools/openapi-generator-cli generate \
+  -i openapi.json -g typescript-fetch -o ./client
+```
+
+### Where these live
+
+| Source | Produces |
+|--------|----------|
+| [`frontend/src/assets/api-documentation.html`](frontend/src/assets/api-documentation.html) | `/api-docs` &mdash; a hand-written, self-contained page (no CDN, no build step) copied into the bundle by the Angular build |
+| `@Tag` / `@Operation` annotations on the JAX-RS resources, plus `config/OpenApiDefinition.java` | `/q/openapi` and `/q/swagger-ui` |
+
+Swagger UI is a dev-only feature in Quarkus by default. `quarkus.swagger-ui.always-include=true` in
+`application.properties` ships it in the runtime image too. **Set it to `false` for a deployment
+that should not publish its schema** &mdash; note that `/q/*` is not behind the bearer-token filter.
 
 ## API Endpoints
 
@@ -621,6 +669,8 @@ an intent.
 | `401` on `/v1/*` or `/admin/api/*` | Missing or expired bearer token. Re-exchange the API key at `POST /api/auth/token` |
 | `401` even with the right key | You may be locked out after 10 failed attempts; the window clears after 5 minutes |
 | Streaming returns everything at once | Expected for watsonx and Bedrock — see the Streaming column under Supported LLM Providers |
+| `/api-docs` returns the Angular shell or 404 | The UI bundle was not built, or `UI_REQUIRED=false`. Both `/api-docs` and the SPA routes need the bundle |
+| `/q/swagger-ui` returns 404 | `quarkus.swagger-ui.always-include` is `false`, or you are on a build predating the OpenAPI extension |
 
 ## Technology Stack
 

@@ -16,6 +16,8 @@ import { AuthService } from './shared/services/auth.service';
              [routerLinkActiveOptions]="{ exact: true }" class="nav-link">Home</a>
           <a routerLink="/playground" routerLinkActive="active" class="nav-link">Playground</a>
           <a routerLink="/admin" routerLinkActive="active" class="nav-link">Admin</a>
+          <!-- Static page outside the SPA, so a plain href rather than routerLink. -->
+          <a href="/api-docs" class="nav-link">API Docs</a>
         </nav>
         @if (auth.isAuthenticated()) {
           <button class="signout-btn" (click)="auth.logout()">Sign Out</button>

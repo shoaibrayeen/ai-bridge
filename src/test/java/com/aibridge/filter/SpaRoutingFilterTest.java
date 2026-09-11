@@ -1,40 +1,73 @@
 package com.aibridge.filter;
 
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.vertx.ext.web.Route;
-import io.vertx.ext.web.Router;
-import io.vertx.ext.web.RoutingContext;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.junit.jupiter.MockitoExtension;
-import io.vertx.core.Handler;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-@ExtendWith(MockitoExtension.class)
 class SpaRoutingFilterTest {
 
-    @Test
-    @SuppressWarnings("unchecked")
-    void init_registersRouteAndReroutesToIndex() {
-        Router router = mock(Router.class);
-        Route route = mock(Route.class);
-        when(router.getWithRegex(anyString())).thenReturn(route);
+    /**
+     * Every path in {@code frontend/src/app/app.routes.ts}. An earlier enumerated regex covered
+     * only three of these, so refreshing on the others returned an error page.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/",
+        "/login",
+        "/playground",
+        "/admin",
+        "/admin/",
+        "/admin/health",
+        "/admin/load-test",
+        "/admin/llm-configs",
+        "/admin/llm-configs/new",
+        "/admin/llm-configs/3f9a2c41-0000-0000-0000-000000000000",
+        "/admin/llm-providers",
+        "/docs"
+    })
+    void everyClientRouteRendersTheSpaShell(String path) {
+        assertTrue(SpaRoutingFilter.isSpaRoute(path), path + " should render the SPA");
+    }
 
-        ArgumentCaptor<Handler<RoutingContext>> captor = ArgumentCaptor.forClass(Handler.class);
-        when(route.handler(captor.capture())).thenReturn(route);
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/v1",
+        "/v1/models",
+        "/v1/chat/completions",
+        "/api/auth/token",
+        "/admin/api",
+        "/admin/api/llm-configs",
+        "/admin/api/health"
+    })
+    void apiPathsAreNeverSwallowed(String path) {
+        assertFalse(SpaRoutingFilter.isSpaRoute(path), path + " must reach JAX-RS");
+    }
 
-        SpaRoutingFilter filter = new SpaRoutingFilter();
-        filter.init(router);
+    @ParameterizedTest
+    @ValueSource(strings = {"/q", "/q/health", "/q/health/ready", "/q/openapi", "/q/swagger-ui"})
+    void quarkusInternalPathsAreNeverSwallowed(String path) {
+        assertFalse(SpaRoutingFilter.isSpaRoute(path), path + " must reach Quarkus");
+    }
 
-        verify(router).getWithRegex(eq("^/(?:login|playground|admin(?:/(?:health|load-test))?)/?$"));
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/index.html",
+        "/favicon.ico",
+        "/main-PDRECYTF.js",
+        "/styles-XHJLTJX6.css",
+        "/assets/logo.png",
+        "/api-documentation.html"
+    })
+    void fileRequestsReachTheStaticHandler(String path) {
+        assertFalse(SpaRoutingFilter.isSpaRoute(path), path + " is a file, not a route");
+    }
 
-        RoutingContext ctx = mock(RoutingContext.class);
-        captor.getValue().handle(ctx);
-        verify(ctx).reroute("/index.html");
+    @ParameterizedTest
+    @ValueSource(strings = {"/adminx", "/apifoo", "/v1x", "/qq"})
+    void prefixLookalikesAreStillSpaRoutes(String path) {
+        // The exclusions are path-segment boundaries, not bare string prefixes.
+        assertTrue(SpaRoutingFilter.isSpaRoute(path), path + " is not an API path");
     }
 }
