@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { ThemeService } from './shared/services/theme.service';
+import { AuthService } from './shared/services/auth.service';
 
 @Component({
   selector: 'app-root',
@@ -16,6 +17,9 @@ import { ThemeService } from './shared/services/theme.service';
           <a routerLink="/playground" routerLinkActive="active" class="nav-link">Playground</a>
           <a routerLink="/admin" routerLinkActive="active" class="nav-link">Admin</a>
         </nav>
+        @if (auth.isAuthenticated()) {
+          <button class="signout-btn" (click)="auth.logout()">Sign Out</button>
+        }
         <button class="theme-btn" (click)="theme.toggle()" [attr.aria-label]="'Switch to ' + (theme.current() === 'light' ? 'dark' : 'light') + ' mode'">
           {{ theme.current() === 'light' ? '◑' : '◐' }}
         </button>
@@ -50,6 +54,13 @@ import { ThemeService } from './shared/services/theme.service';
     }
     .nav-link:hover { color: var(--text); background: var(--bg-surface-hover); }
     .nav-link.active { color: var(--primary); background: var(--primary-muted); }
+    .signout-btn {
+      padding: 0.3rem 0.7rem; font-size: 0.75rem; font-weight: 600;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg-surface); color: var(--text-secondary);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .signout-btn:hover { border-color: var(--danger); color: var(--danger); }
     .theme-btn {
       width: 2rem; height: 2rem; border-radius: 50%;
       border: 1px solid var(--border); background: var(--bg-surface);
@@ -71,4 +82,5 @@ import { ThemeService } from './shared/services/theme.service';
 })
 export class AppComponent {
   readonly theme = inject(ThemeService);
+  readonly auth = inject(AuthService);
 }
