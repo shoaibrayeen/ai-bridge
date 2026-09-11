@@ -89,8 +89,18 @@ mocked unit tests could never see:
    `@JsonProperty` alone does not cancel an ignore marker). Regression test now does the real
    round-trip: captures what `setex` stores and feeds it back.
 
-**The lesson, twice over: repository JPQL and entity JSON round-trips are invisible to the
-repository-mocking test suite.** Anything touching real SQL grammar or Jackson serialization needs
+3. **Every data-loading page in the Angular app froze at "Loading…".** Angular 21 defaults to
+   zoneless change detection; the components mutate plain fields inside `subscribe()` callbacks,
+   which zoneless never notices. Requests succeeded underneath while the view never re-rendered.
+   Fixed with `provideZoneChangeDetection()` in `main.ts` (zone.js was already in the polyfills);
+   the durable fix is migrating components to signals.
+4. **Unhashed entry points were served `Cache-Control: immutable, max-age=86400`.** Browsers keep
+   the day-old app shell — pointing at old chunk hashes — across redeploys. Fixed with
+   `quarkus.http.static-resources.max-age=0S` (revalidation via 304s). Browsers that already
+   cached under the old header self-heal only after 24h or a hard refresh.
+
+**The lesson, four times over: repository JPQL, entity JSON round-trips, change-detection
+semantics and HTTP caching are all invisible to the repository-mocking test suite.** Anything touching real SQL grammar or Jackson serialization needs
 a live check (or future @QuarkusTest integration tests) before it can be called validated.
 
 Everything verified live this round: fresh-volume deploy (Flyway V1+V2 on empty DB), non-root
@@ -98,7 +108,9 @@ container, prod-profile refusal of placeholder secrets AND prod boot with real o
 failover 429→fallback with lineage, streaming (native SSE frames, `[DONE]`, gateway model
 re-stamped), cache-hit repeat calls, model pinning, pinned-429→502, cross-tenant 404s, brute-force
 lockout, `/api-docs`, Swagger UI, OpenAPI (21 operations), SPA deep links, 404 envelope,
-`.env.example` ↔ property parity (25 keys, none orphaned). 704 unit tests green.
+`.env.example` ↔ property parity (25 keys, none orphaned), the admin UI rendering all four gateway
+model names in a browser, and a stale token now bouncing cleanly back to `/login` (interceptor
+catches 401, clears the token). 704 unit tests green.
 
 The `mockllm` container is not part of docker-compose; remove it with `docker rm -f mockllm`
 (the `demo` tenant's configs point at it and will 502 once it is gone).
