@@ -54,6 +54,12 @@ public class EncryptionService {
     }
 
     public String decrypt(String ciphertext) {
+        if (ciphertext == null || ciphertext.isBlank()) {
+            // A null here has historically meant the value was lost in transit (e.g. stripped by
+            // serialization), not that nothing was stored — say so instead of raising an NPE.
+            throw new EncryptionException(
+                    new IllegalArgumentException("Ciphertext is null or blank — credentials missing"));
+        }
         try {
             byte[] keyBytes =
                     encryptionConfig.getEncryptionKey().getBytes(StandardCharsets.UTF_8);

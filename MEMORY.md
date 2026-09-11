@@ -71,7 +71,39 @@ Durable decisions, constraints and conventions. Change these only when the decis
 
 Current state of the work. Prune anything that has landed and stopped being interesting.
 
-### As of 2026-09-12
+### Validation pass, 2026-09-12 (second round)
+
+Full live validation with a mock OpenAI-compatible provider (`mockllm`, a plain-python container on
+the compose network; configs seeded by SQL because the SSRF guard rightly refuses its private IP).
+This closed the "never exercised a real LLM call" gap — and caught **two more latent bugs** that
+mocked unit tests could never see:
+
+1. **The core routing query failed on PostgreSQL.** `findByTenantAndFeatureOrGlobal` used
+   `SELECT DISTINCT` with an `ORDER BY CASE` expression not in the select list — illegal in
+   Postgres. Every tenant-scoped, feature-routed completion 500'd. DISTINCT was removable outright:
+   `UNIQUE(llm_config_id, feature)` already guarantees one join row per config.
+2. **Every config-cache HIT produced credential-less configs.** `LlmConfig.credentialsEncrypted` is
+   `@JsonIgnore` (correct for API safety), but the chain cache round-trips entities through JSON
+   with the same mapper — first call worked, every call for the next five minutes failed to
+   decrypt. Fixed with a cache-only mixin (`@JsonIgnore(false)` + `@JsonProperty`; note that
+   `@JsonProperty` alone does not cancel an ignore marker). Regression test now does the real
+   round-trip: captures what `setex` stores and feeds it back.
+
+**The lesson, twice over: repository JPQL and entity JSON round-trips are invisible to the
+repository-mocking test suite.** Anything touching real SQL grammar or Jackson serialization needs
+a live check (or future @QuarkusTest integration tests) before it can be called validated.
+
+Everything verified live this round: fresh-volume deploy (Flyway V1+V2 on empty DB), non-root
+container, prod-profile refusal of placeholder secrets AND prod boot with real ones (JSON logs on),
+failover 429→fallback with lineage, streaming (native SSE frames, `[DONE]`, gateway model
+re-stamped), cache-hit repeat calls, model pinning, pinned-429→502, cross-tenant 404s, brute-force
+lockout, `/api-docs`, Swagger UI, OpenAPI (21 operations), SPA deep links, 404 envelope,
+`.env.example` ↔ property parity (25 keys, none orphaned). 704 unit tests green.
+
+The `mockllm` container is not part of docker-compose; remove it with `docker rm -f mockllm`
+(the `demo` tenant's configs point at it and will 502 once it is gone).
+
+### As of 2026-09-12 (first round)
 
 **Shipped and verified against the running Docker stack:**
 
@@ -98,6 +130,8 @@ Current state of the work. Prune anything that has landed and stopped being inte
 
 **Not done / next:**
 
-- No real LLM call has been exercised end to end — that needs real provider credentials. The seed
-  rows in the local database hold fake ciphertext, so a completion against them fails at decryption.
+- ~~No real LLM call exercised end to end~~ — closed in the second-round validation via the mock
+  provider. Real *external* providers (actual OpenAI/Anthropic/AWS/IBM credentials) remain untested.
 - Per-consumer API keys, if one shared key stops being acceptable.
+- Consider @QuarkusTest integration tests (Dev Services) so SQL grammar and cache round-trips get
+  CI coverage instead of manual live validation.

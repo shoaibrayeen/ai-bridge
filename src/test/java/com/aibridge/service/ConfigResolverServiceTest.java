@@ -56,6 +56,55 @@ class ConfigResolverServiceTest {
         Field om = ConfigResolverService.class.getDeclaredField("objectMapper");
         om.setAccessible(true);
         om.set(configResolverService, objectMapper);
+        // Production wiring runs @PostConstruct; tests must too, or the cache mapper is null.
+        java.lang.reflect.Method init =
+                ConfigResolverService.class.getDeclaredMethod("initCacheMapper");
+        init.setAccessible(true);
+        init.invoke(configResolverService);
+    }
+
+    /**
+     * Regression: the entity marks credentialsEncrypted as @JsonIgnore, and the chain cache
+     * round-trips entities through JSON. With the default mapper the first (cache-miss) call
+     * worked and every cache HIT for the next five minutes produced configs whose credentials
+     * were null. This test does the real round-trip: capture what resolveChain stores, feed it
+     * back as a hit, and require the credentials to survive.
+     */
+    @Test
+    void cacheRoundTrip_preservesEncryptedCredentials() {
+        String tenant = "t1";
+        String feature = "chat";
+        String cacheKey = RedisConfig.configCacheKey(tenant, feature);
+
+        LlmConfig cfg = sampleConfig();
+        cfg.setCredentialsEncrypted("ciphertext-base64");
+        when(cacheProvider.get(cacheKey)).thenReturn(null);
+        when(llmConfigRepository.findByTenantAndFeatureOrGlobal(tenant, feature))
+                .thenReturn(List.of(cfg));
+
+        configResolverService.resolveChain(tenant, feature);
+
+        org.mockito.ArgumentCaptor<String> stored =
+                org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(cacheProvider).setex(eq(cacheKey), anyLong(), stored.capture());
+
+        // Second call: a cache hit served from exactly the JSON the first call wrote.
+        when(cacheProvider.get(cacheKey)).thenReturn(stored.getValue());
+
+        List<LlmConfig> fromCache = configResolverService.resolveChain(tenant, feature);
+
+        assertEquals("ciphertext-base64", fromCache.get(0).getCredentialsEncrypted(),
+                "credentials must survive the cache round-trip or every cache hit fails to decrypt");
+    }
+
+    @Test
+    void cacheRoundTrip_stillHidesCredentialsFromTheDefaultMapper() throws Exception {
+        // The un-ignore is scoped to the cache mapper; API-facing serialization stays safe.
+        LlmConfig cfg = sampleConfig();
+        cfg.setCredentialsEncrypted("ciphertext-base64");
+        String apiJson = objectMapper.writeValueAsString(cfg);
+        org.junit.jupiter.api.Assertions.assertFalse(apiJson.contains("ciphertext-base64"),
+                "default serialization must never carry ciphertext: " + apiJson);
     }
 
     @Test
@@ -91,8 +140,12 @@ class ConfigResolverServiceTest {
         List<LlmConfig> resolved = configResolverService.resolveChain(tenant, feature);
 
         assertEquals(1, resolved.size());
-        verify(cacheProvider)
-                .setex(eq(cacheKey), eq(300L), eq(objectMapper.writeValueAsString(List.of(cfg))));
+        // Assert the stored payload semantically rather than byte-for-byte: the cache mapper
+        // deliberately serializes more than the API-facing mapper (credentials included).
+        org.mockito.ArgumentCaptor<String> stored = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(cacheProvider).setex(eq(cacheKey), eq(300L), stored.capture());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                stored.getValue().contains(cfg.getModelName()), stored.getValue());
     }
 
     @Test
@@ -118,8 +171,11 @@ class ConfigResolverServiceTest {
         String cacheKey = RedisConfig.configCacheKey(tenant, feature);
 
         ObjectMapper spyMapper = Mockito.spy(objectMapper);
-        Field om = ConfigResolverService.class.getDeclaredField("objectMapper");
+        // The cache path now serializes through the dedicated cache mapper, so the failure has to
+        // be injected there — the plain objectMapper field is no longer on that code path.
+        Field om = ConfigResolverService.class.getDeclaredField("cacheMapper");
         om.setAccessible(true);
+        Object previous = om.get(configResolverService);
         om.set(configResolverService, spyMapper);
         try {
             Mockito.doThrow(new JsonProcessingException("cannot serialize") {})
@@ -136,7 +192,7 @@ class ConfigResolverServiceTest {
             assertEquals(1, resolved.size());
             verify(cacheProvider, never()).setex(anyString(), anyLong(), anyString());
         } finally {
-            om.set(configResolverService, objectMapper);
+            om.set(configResolverService, previous);
         }
     }
 
@@ -169,8 +225,12 @@ class ConfigResolverServiceTest {
         assertEquals(1, resolved.size());
         verify(cacheProvider).del(cacheKey);
         verify(llmConfigRepository).findByTenantAndFeatureOrGlobal(tenant, feature);
-        verify(cacheProvider)
-                .setex(eq(cacheKey), eq(300L), eq(objectMapper.writeValueAsString(List.of(cfg))));
+        // Assert the stored payload semantically rather than byte-for-byte: the cache mapper
+        // deliberately serializes more than the API-facing mapper (credentials included).
+        org.mockito.ArgumentCaptor<String> stored = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(cacheProvider).setex(eq(cacheKey), eq(300L), stored.capture());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                stored.getValue().contains(cfg.getModelName()), stored.getValue());
     }
 
     @Test

@@ -6,9 +6,12 @@ import com.aibridge.exception.ConfigNotFoundException;
 import com.aibridge.model.Feature;
 import com.aibridge.model.LlmConfig;
 import com.aibridge.repository.LlmConfigRepository;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.List;
@@ -31,6 +34,29 @@ public class ConfigResolverService {
     ObjectMapper objectMapper;
 
     /**
+     * Mapper used only for the chain cache. {@code LlmConfig.credentialsEncrypted} is
+     * {@code @JsonIgnore} so the entity can never leak ciphertext through an API response — but
+     * the cache round-trips the entity through JSON, and dropping the field there meant every
+     * cache <em>hit</em> produced configs whose credentials were null. First call fine, second
+     * call broken, for five minutes. The mixin un-ignores the field for this mapper alone.
+     */
+    private ObjectMapper cacheMapper;
+
+    @PostConstruct
+    void initCacheMapper() {
+        cacheMapper = objectMapper.copy().addMixIn(LlmConfig.class, IncludeCredentialsInCache.class);
+    }
+
+    private abstract static class IncludeCredentialsInCache {
+        // @JsonProperty alone does not beat the entity's @JsonIgnore — the ignore marker must be
+        // explicitly cancelled, then the property declared.
+        @JsonIgnore(false)
+        @JsonProperty
+        @SuppressWarnings("unused")
+        String credentialsEncrypted;
+    }
+
+    /**
      * Resolves the failover chain for the tenant and feature. Order from the repository is tenant primary,
      * tenant fallback, then global primary, global fallback.
      */
@@ -39,7 +65,7 @@ public class ConfigResolverService {
         String cached = cacheProvider.get(cacheKey);
         if (cached != null && !cached.isEmpty()) {
             try {
-                return objectMapper.readValue(cached, LLM_CONFIG_LIST_TYPE);
+                return cacheMapper.readValue(cached, LLM_CONFIG_LIST_TYPE);
             } catch (JsonProcessingException e) {
                 cacheProvider.del(cacheKey);
             }
@@ -51,7 +77,7 @@ public class ConfigResolverService {
         }
 
         try {
-            cacheProvider.setex(cacheKey, CONFIG_CACHE_TTL_SECONDS, objectMapper.writeValueAsString(fromDb));
+            cacheProvider.setex(cacheKey, CONFIG_CACHE_TTL_SECONDS, cacheMapper.writeValueAsString(fromDb));
         } catch (JsonProcessingException ignored) {
             // Cache is best-effort; return DB result even if serialization fails.
         }

@@ -20,8 +20,13 @@ public class LlmConfigRepository implements PanacheRepositoryBase<LlmConfig, UUI
     }
 
     public List<LlmConfig> findByTenantAndFeatureOrGlobal(String tenantId, String feature) {
+        // No DISTINCT: the join can only produce one row per config because
+        // UNIQUE(llm_config_id, feature) allows a single feature row to equal ?2. DISTINCT here
+        // is not merely redundant — PostgreSQL rejects SELECT DISTINCT whose ORDER BY uses an
+        // expression (the tenant CASE) that is not in the select list, which made this query
+        // fail at runtime while every repository-mocking unit test stayed green.
         return list(
-                "SELECT DISTINCT c FROM LlmConfig c JOIN c.features f "
+                "SELECT c FROM LlmConfig c JOIN c.features f "
                         + "WHERE f.feature = ?2 AND c.isActive = true "
                         + "AND ((?1 IS NOT NULL AND (c.tenantId = ?1 OR c.tenantId IS NULL)) "
                         + "OR (?1 IS NULL AND c.tenantId IS NULL)) "
