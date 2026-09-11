@@ -18,6 +18,7 @@ import com.aibridge.adapter.LlmProviderAdapter;
 import com.aibridge.dto.lineage.AttemptOutcome;
 import com.aibridge.dto.lineage.CallAttempt;
 import com.aibridge.dto.lineage.CompletionLineage;
+import com.aibridge.dto.openai.ChatCompletionChunk;
 import com.aibridge.dto.openai.ChatCompletionRequest;
 import com.aibridge.dto.openai.ChatCompletionResponse;
 import com.aibridge.dto.openai.ChatMessage;
@@ -35,6 +36,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.BeforeEach;
@@ -677,5 +679,183 @@ class ChatCompletionServiceTest {
         r.setChoices(List.of(choice));
         r.setUsage(usage);
         return r;
+    }
+
+    // =========================================================================
+    // Streaming — adapter and DAO both mocked.
+    // =========================================================================
+
+    @Test
+    void stream_returnsChunksFromTheFirstHealthyConfig() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain("t", "f")).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), eq(cfg))).thenReturn(merged);
+        when(openAiAdapter.completeStream(merged, cfg))
+                .thenReturn(Stream.of(
+                        ChatCompletionChunk.roleChunk("id", "ai-bridge-1-m1"),
+                        ChatCompletionChunk.contentChunk("id", "ai-bridge-1-m1", "hi")));
+
+        ChatCompletionService.StreamingCompletion out =
+                chatCompletionService.completeStream("t", "f", userRequest());
+
+        List<ChatCompletionChunk> chunks = out.chunks().toList();
+        assertEquals(2, chunks.size());
+        assertEquals("hi", chunks.get(1).getChoices().get(0).getDelta().getContent());
+        verify(requestPacingService).acquireSlot(cfg);
+    }
+
+    @Test
+    void stream_failsOverWhenEstablishingTheStreamIsRateLimited() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.completeStream(merged, first))
+                .thenThrow(new ProviderRateLimitException("429"));
+        when(openAiAdapter.completeStream(merged, second))
+                .thenReturn(Stream.of(ChatCompletionChunk.contentChunk("id", "m", "ok")));
+
+        ChatCompletionService.StreamingCompletion out =
+                chatCompletionService.completeStream("t", "f", userRequest());
+
+        assertEquals(1, out.chunks().toList().size());
+        assertEquals(AttemptOutcome.RATE_LIMITED, out.lineage().getAttempts().get(0).getOutcome());
+        assertEquals(AttemptOutcome.SUCCESS, out.lineage().getAttempts().get(1).getOutcome());
+    }
+
+    @Test
+    void stream_failsOverOnQueueTimeout() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        doThrow(new QueueTimeoutException(first.getId().toString()))
+                .when(requestPacingService)
+                .acquireSlot(first);
+        when(openAiAdapter.completeStream(merged, second))
+                .thenReturn(Stream.of(ChatCompletionChunk.contentChunk("id", "m", "ok")));
+
+        ChatCompletionService.StreamingCompletion out =
+                chatCompletionService.completeStream("t", "f", userRequest());
+
+        assertEquals(AttemptOutcome.QUEUE_TIMEOUT, out.lineage().getAttempts().get(0).getOutcome());
+        verify(openAiAdapter, never()).completeStream(merged, first);
+    }
+
+    @Test
+    void stream_chainExhaustedThrows() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.completeStream(merged, cfg))
+                .thenThrow(new ProviderUnavailableException("503"));
+
+        assertThrows(
+                ProviderUnavailableException.class,
+                () -> chatCompletionService.completeStream("t", "f", userRequest()));
+    }
+
+    @Test
+    void stream_tokensFromTheTerminatingChunkLandInTheLineage() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.completeStream(merged, cfg))
+                .thenReturn(Stream.of(
+                        ChatCompletionChunk.contentChunk("id", "m", "hi"),
+                        ChatCompletionChunk.finalChunk("id", "m", "stop", usage(11, 4, 15))));
+
+        ChatCompletionService.StreamingCompletion out =
+                chatCompletionService.completeStream("t", "f", userRequest());
+
+        // Usage is only known once the client drains the stream.
+        assertNull(out.lineage().getAttempts().get(0).getTotalTokens());
+        out.chunks().forEach(c -> { });
+        assertEquals(15, out.lineage().getAttempts().get(0).getTotalTokens());
+        assertEquals(15, out.lineage().getBilledTotalTokens());
+    }
+
+    @Test
+    void stream_honoursGatewayModelPinning() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveByGatewayModelName("t", "ai-bridge-1-m1"))
+                .thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.completeStream(merged, cfg))
+                .thenReturn(Stream.of(ChatCompletionChunk.contentChunk("id", "m", "ok")));
+
+        ChatCompletionRequest req = userRequest();
+        req.setModel("ai-bridge-1-m1");
+        req.setStream(true);
+
+        ChatCompletionService.StreamingCompletion out =
+                chatCompletionService.completeStream("t", null, req);
+
+        assertEquals(CompletionLineage.ROUTING_MODEL, out.lineage().getRouting());
+        verify(configResolverService, never()).resolveChain(any(), any());
+    }
+
+    // =========================================================================
+    // Unexpected failures: recorded, logged, rethrown — never failed over.
+    // =========================================================================
+
+    @Test
+    void unexpectedFailure_isRecordedAsErrorAndRethrownWithoutFailover() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, first))
+                .thenThrow(new IllegalStateException("Invalid credentials JSON"));
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> chatCompletionService.complete("t", "f", userRequest()));
+
+        assertEquals("Invalid credentials JSON", thrown.getMessage());
+        // A bad key fails identically on every config, so trying the next one only hides the cause.
+        verify(openAiAdapter, never()).complete(merged, second);
+    }
+
+    @Test
+    void unexpectedFailure_duringStreamingAlsoRethrows() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.completeStream(merged, first))
+                .thenThrow(new IllegalStateException("Missing api_key in credentials"));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> chatCompletionService.completeStream("t", "f", userRequest()));
+
+        verify(openAiAdapter, never()).completeStream(merged, second);
+    }
+
+    @Test
+    void unexpectedFailure_stillCountsAsAnAttemptSoTheChainIsNotSilent() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, cfg))
+                .thenThrow(new IllegalStateException("boom"));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> chatCompletionService.complete("t", "f", userRequest()));
+
+        // The lineage is not returned on the throwing path, but the outcome exists so the logged
+        // line names the failing config rather than going silent.
+        verify(requestPacingService).acquireSlot(cfg);
     }
 }

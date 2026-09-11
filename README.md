@@ -343,6 +343,43 @@ Returns the standard OpenAI envelope, so unmodified OpenAI SDKs and tools can en
 
 A config belonging to another tenant is reported as 404, identically to one that does not exist.
 
+### Streaming
+
+Set `"stream": true` in the request body. The response becomes a `text/event-stream` in the OpenAI
+wire format — one `data:` line per chunk, terminated by `data: [DONE]`:
+
+```bash
+curl -N http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Feature: chat' -H 'Content-Type: application/json' \
+  -d '{"stream": true, "messages": [{"role":"user","content":"Hello"}]}'
+```
+
+```
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{"content":"Hel"}}]}
+
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","model":"ai-bridge-1-gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]
+```
+
+Works against **every** provider. Where the provider speaks a streaming protocol the gateway
+understands (OpenAI, Cerebras, Claude), tokens are forwarded as they arrive. Where it does not
+(watsonx, Bedrock), the gateway makes the blocking call and emits the answer as a single content
+chunk — the client sees the same well-formed stream, it just waits for the whole answer first. See
+the Streaming column in [Supported LLM Providers](#supported-llm-providers).
+
+Two behaviours worth knowing:
+
+- **Failover covers establishing the stream, not the middle of it.** Acquiring a pacing slot and
+  getting the provider to start answering are retried down the chain as usual. Once the first chunk
+  has reached the client, bytes are on the wire and there is no honest way to switch providers, so
+  a mid-stream failure ends the stream.
+- **Token counts arrive last.** `usage` rides on the terminating chunk, so the lineage's token
+  detail is only complete once the stream has been fully read.
+
 ### Request Lineage
 
 Every completion builds a trail of which configs were attempted, how each ended, and the tokens each consumed. It is **always logged** with the request id, and returned in the response body only when the request carries `X-Include-Lineage: true`:
@@ -523,6 +560,51 @@ mvn verify -Psecurity-scan
 
 Scans all transitive dependencies for known CVEs.
 
+## Security
+
+### What the gateway enforces
+
+| Control | Mechanism |
+|---------|-----------|
+| Consumer authentication | Static API key exchanged at `POST /api/auth/token` for an opaque bearer token (default 60 min). The key never travels on subsequent calls. `ApiAuthFilter` requires the token on all of `/v1/*` and `/admin/api/*` |
+| Brute-force resistance | Failed key exchanges are counted per caller for 5 minutes; after 10 the caller is refused without the key even being compared. A locked-out caller and a wrong key look identical from outside |
+| Timing attacks | The API key and session token are compared with `MessageDigest.isEqual`, not `String.equals`, so no common-prefix length leaks |
+| Provider credentials at rest | AES-256-GCM with a random IV per record; the auth tag is stored with the ciphertext. Admin reads return a mask, never plaintext |
+| Placeholder secrets | Under the `prod` profile the app **refuses to start** if `AIBRIDGE_AUTH_API_KEY` or `AIBRIDGE_ENCRYPTION_KEY` still hold the values shipped in this repository |
+| SSRF | Every configured endpoint is checked against `aibridge.allowed-provider-hosts`, then resolved and rejected if it points at a loopback, link-local or RFC1918 address |
+| Plain HTTP | Permitted in dev, refused under the `prod` profile |
+| Tenant isolation | A tenant may address only its own configs and the global ones. Naming another tenant's gateway model returns 404, indistinguishable from one that does not exist |
+| Request size | Capped at 1 MB by the HTTP layer |
+| Queue depth | `AIBRIDGE_QUEUE_MAX_DEPTH` bounds the pacing queue so a slow provider cannot exhaust memory |
+| SQL injection | Panache repositories, parameterised throughout |
+| Response headers | `SecurityHeadersFilter` applies the standard hardening set |
+| Traceability | `RequestCorrelationFilter` stamps `X-Request-ID` through the whole call, and the lineage line is logged against it |
+
+### Allowlist patterns
+
+`aibridge.allowed-provider-hosts` accepts two wildcard forms:
+
+| Pattern | Matches | Does not match |
+|---------|---------|----------------|
+| `api.openai.com` | exactly that host | anything else |
+| `*.cloud.ibm.com` | `cloud.ibm.com`, `us-south.ml.cloud.ibm.com` | `notcloud.ibm.com`, `cloud.ibm.com.evil.net` |
+| `bedrock-runtime.*.amazonaws.com` | `bedrock-runtime.us-east-1.amazonaws.com` | `bedrock-runtime.a.b.amazonaws.com`, `bedrock-runtime.us-east-1.evil.com` |
+
+A `*` standing as a whole label matches exactly one label and never crosses a dot. A bare `*` is
+deliberately inert — an entry that would allow every host is far more likely to be a mistake than
+an intent.
+
+### Known limitations
+
+- **DNS rebinding.** The private-address check runs when a config is saved, not on every call. A
+  host that later resolves to an internal address would not be re-checked. The allowlist is the
+  primary control here; keep it tight.
+- **One shared consumer key.** Every consumer presents the same `AIBRIDGE_AUTH_API_KEY`, so
+  revoking one consumer means rotating it for all of them. Per-consumer keys are not implemented.
+- **Secrets are only as safe as `.env`.** `.gitignore` excludes `.env`, `*.env`, and key/certificate
+  material; `.dockerignore` keeps them out of image layers. Neither protects a secret pasted
+  somewhere else.
+
 ## Troubleshooting
 
 | Symptom | Cause / Fix |
@@ -534,6 +616,11 @@ Scans all transitive dependencies for known CVEs.
 | `Invalid API key` from `POST /api/auth/token` | `AIBRIDGE_AUTH_API_KEY` in `.env` doesn't match the key you're sending |
 | Encryption failures on config save | `AIBRIDGE_ENCRYPTION_KEY` is not exactly 32 characters |
 | App container can't reach `postgres`/`redis` | Start it through Compose (`docker compose up -d`) so it joins the same network |
+| App refuses to start with "placeholder secrets still set" | You are on the `prod` profile with the repo's default secrets. Set `AIBRIDGE_AUTH_API_KEY` and `AIBRIDGE_ENCRYPTION_KEY` |
+| Creating a Bedrock config returns "Host is not in aibridge.allowed-provider-hosts" | Your allowlist entry is a literal, not a pattern. Use `bedrock-runtime.*.amazonaws.com` |
+| `401` on `/v1/*` or `/admin/api/*` | Missing or expired bearer token. Re-exchange the API key at `POST /api/auth/token` |
+| `401` even with the right key | You may be locked out after 10 failed attempts; the window clears after 5 minutes |
+| Streaming returns everything at once | Expected for watsonx and Bedrock — see the Streaming column under Supported LLM Providers |
 
 ## Technology Stack
 
@@ -546,10 +633,68 @@ Scans all transitive dependencies for known CVEs.
 
 ## Supported LLM Providers
 
-| Provider | Auth Type | Adapter |
-|----------|-----------|---------|
-| OpenAI | API Key | `OpenAiAdapter` — near pass-through |
-| Cerebras | API Key | `CerebrasAdapter` — OpenAI-compatible |
-| Claude (Anthropic) | API Key | `ClaudeAdapter` — maps messages format |
-| WatsonX (IBM) | IAM Token Exchange | `WatsonXAdapter` — IAM auth + project_id |
-| AWS Bedrock | AWS SigV4 | `BedrockAdapter` — Converse API + SigV4 signing |
+All five are addressable through the same OpenAI-format API. What differs is how the gateway
+authenticates to them and how much translation each adapter has to do.
+
+| Provider | `llm_provider.name` | Auth type | Streaming | Adapter behaviour |
+|----------|---------------------|-----------|-----------|-------------------|
+| OpenAI | `OPENAI` | `API_KEY` | Native | Near pass-through; swaps base URL and key |
+| Cerebras | `CEREBRAS` | `API_KEY` | Native | OpenAI-compatible wire format |
+| Claude (Anthropic) | `CLAUDE` | `API_KEY` | Native | Lifts the system prompt into its own field; maps Anthropic SSE frames to OpenAI chunks |
+| IBM watsonx.ai | `WATSONX` | `IAM_TOKEN` | Buffered | Exchanges the API key for a short-lived IAM token (cached), adds `project_id`, targets `/ml/v1/text/chat` |
+| AWS Bedrock | `BEDROCK` | `AWS_SIGV4` | Buffered | Signs each request with SigV4; maps to the Converse API shape |
+
+**Streaming column:** *Native* means tokens are forwarded as the provider emits them. *Buffered*
+means the gateway makes the ordinary blocking call and emits the answer as a single chunk — the
+client still gets a valid `text/event-stream` and `[DONE]` sentinel, it just waits for the whole
+answer first. No client code changes between the two.
+
+### Auth types explained
+
+The `auth_type` on `llm_provider` decides how the adapter turns stored credentials into an
+authenticated request.
+
+| `auth_type` | Credentials JSON you store | What the adapter does |
+|-------------|----------------------------|-----------------------|
+| `API_KEY` | `{"api_key": "sk-..."}` | Sends the key directly — `Authorization: Bearer` for OpenAI/Cerebras, `x-api-key` for Claude |
+| `IAM_TOKEN` | `{"api_key": "..."}` plus `extra_params: {"project_id": "..."}` | Exchanges the API key at the provider's `auth_endpoint` for a bearer token, caches it under `auth_token:{providerId}:{configId}` until shortly before it expires, then reuses it |
+| `AWS_SIGV4` | `{"access_key_id": "...", "secret_access_key": "...", "session_token": "..."}` plus `extra_params: {"region": "us-east-1"}` | Computes an AWS SigV4 signature per request; nothing is cached because each signature is request-specific |
+| `OAUTH2` | reserved | Declared in the schema; no adapter uses it yet |
+
+Whatever the provider needs, **your consumers only ever see one credential**: the AIBridge API key
+they exchange for a bearer token at `POST /api/auth/token`. Provider keys stay encrypted in the
+database and never leave the gateway.
+
+### Adding a watsonx.ai config
+
+watsonx is the one provider with a two-step auth, so it is worth spelling out:
+
+```bash
+# 1. Register the provider once, with the IBM IAM endpoint
+curl -X POST http://localhost:8080/admin/api/llm-providers \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+    "name": "WATSONX",
+    "auth_type": "IAM_TOKEN",
+    "auth_endpoint": "https://iam.cloud.ibm.com/identity/token"
+  }'
+
+# 2. Add a config. project_id goes in extra_params; the API key is exchanged for
+#    an IAM token on first use and cached until it nears expiry.
+curl -X POST http://localhost:8080/admin/api/llm-configs \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+    "provider_id": "<id from step 1>",
+    "model_name": "meta-llama/llama-3-8b-instruct",
+    "endpoint_url": "https://us-south.ml.cloud.ibm.com/ml/v1/text/chat?version=2024-03-14",
+    "credentials": "{\"api_key\": \"<your IBM Cloud API key>\"}",
+    "extra_params": "{\"project_id\": \"<your watsonx project id>\"}",
+    "features": ["chat"],
+    "rps_limit": 5
+  }'
+```
+
+The create call makes a real completion against watsonx before persisting anything, so a wrong key,
+a wrong `project_id` or an unreachable region comes back as `422` with the provider's own message
+rather than failing at the first real request. The response carries the assigned
+`gateway_model_name`, e.g. `ai-bridge-1-meta-llama-llama-3-8b-instruct`.

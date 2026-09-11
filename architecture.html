@@ -212,7 +212,7 @@ footer{
     <div class="fact"><dt>Runtime</dt><dd>Quarkus 3.17 &middot; Java 17</dd></div>
     <div class="fact"><dt>Providers</dt><dd>5 adapters</dd></div>
     <div class="fact"><dt>Routing key</dt><dd>tenant &times; feature</dd></div>
-    <div class="fact"><dt>Pacing</dt><dd>RPS / RPM / TPM</dd></div>
+    <div class="fact"><dt>Streaming</dt><dd>SSE, all providers</dd></div>
     <div class="fact"><dt>State</dt><dd>Postgres + cache</dd></div>
   </dl>
 </header>
@@ -227,6 +227,7 @@ footer{
     <li><a href="#resolution">Config resolution</a></li>
     <li><a href="#pacing">Rate pacing</a></li>
     <li><a href="#adapters">Provider adapters</a></li>
+    <li><a href="#streaming">Streaming</a></li>
     <li><a href="#data">Data model</a></li>
     <li><a href="#state">Cache &amp; state</a></li>
     <li><a href="#errors">Error mapping</a></li>
@@ -411,6 +412,7 @@ footer{
         <tr><td><span class="pill p-crit">provider 429</span></td><td>Step 04</td><td>Upstream rate limit reached despite local pacing</td></tr>
         <tr><td><span class="pill p-crit">provider 5xx</span></td><td>Step 04</td><td>Provider down, or the HTTP call timed out</td></tr>
         <tr><td><span class="pill p-ok">empty response</span></td><td>Step 05</td><td><em>Not</em> a trigger &mdash; returned to the caller as 200 with empty content</td></tr>
+        <tr><td><span class="pill p-crit">unexpected error</span></td><td>Any</td><td><em>Not</em> a trigger &mdash; a bad key or malformed credentials fails identically on every config, so it is recorded, logged and rethrown</td></tr>
       </tbody>
     </table>
   </div>
@@ -557,6 +559,81 @@ footer{
         <tr><td>stop, presence_penalty, frequency_penalty</td></tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<!-- ==================== 5b ==================== -->
+<section id="streaming">
+  <h2>Streaming</h2>
+  <p class="kicker">Two protocols, one output</p>
+
+  <p>Setting <code>"stream": true</code> switches the response to <code>text/event-stream</code> in the OpenAI wire format &mdash; one <code>data:</code> line per chunk, terminated by <code>data: [DONE]</code>. It works against every provider, but the path differs depending on whether the gateway speaks that provider&rsquo;s streaming protocol.</p>
+
+  <figure>
+    <div class="figframe">
+      <svg viewBox="0 0 860 300" role="img" aria-label="Streaming: a request with stream true acquires a pacing slot, then either forwards provider SSE frames through the parsers as they arrive, or for providers without a supported streaming protocol makes the blocking call and emits the answer as one chunk. Both paths produce the same event stream.">
+        <defs>
+          <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h"/></marker>
+          <marker id="a5ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-ok"/></marker>
+          <marker id="a5w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-w"/></marker>
+        </defs>
+
+        <rect class="b" x="20" y="112" width="130" height="48" rx="3"/>
+        <text class="t" x="85" y="132" text-anchor="middle">stream: true</text>
+        <text class="ts" x="85" y="148" text-anchor="middle">+ pacing slot</text>
+
+        <path class="l" d="M150,136 H206" marker-end="url(#a5)"/>
+
+        <rect class="b-a" x="210" y="106" width="180" height="60" rx="3"/>
+        <text class="t" x="300" y="130" text-anchor="middle">Adapter</text>
+        <text class="ts" x="300" y="147" text-anchor="middle">supportsNativeStreaming?</text>
+
+        <path class="l-ok" d="M390,124 H446" marker-end="url(#a5ok)"/>
+        <text class="tl" x="396" y="117">yes</text>
+        <path class="l-w" d="M390,152 H446" marker-end="url(#a5w)"/>
+        <text class="tl" x="396" y="172">no</text>
+
+        <rect class="b-ok" x="450" y="56" width="300" height="66" rx="3"/>
+        <text class="t" x="464" y="78">Native &mdash; OpenAI, Cerebras, Claude</text>
+        <text class="ts" x="464" y="95">provider SSE &rarr; SseParsers &rarr; chunks</text>
+        <text class="tl" x="464" y="112">tokens forwarded as they arrive</text>
+
+        <rect class="b-w" x="450" y="142" width="300" height="66" rx="3"/>
+        <text class="t" x="464" y="164">Buffered &mdash; watsonx, Bedrock</text>
+        <text class="ts" x="464" y="181">blocking complete() &rarr; one content chunk</text>
+        <text class="tl" x="464" y="198">client waits, but the stream is well-formed</text>
+
+        <path class="l" d="M600,122 V238" marker-end="url(#a5)"/>
+        <path class="l" d="M600,208 V238"/>
+
+        <rect class="b" x="450" y="238" width="300" height="46" rx="3"/>
+        <text class="ts" x="600" y="258" text-anchor="middle">data: {chunk}  &hellip;  data: [DONE]</text>
+        <text class="tl" x="600" y="274" text-anchor="middle">identical to the client either way</text>
+      </svg>
+    </div>
+    <figcaption><b>The client cannot tell which path it got.</b> That is the point &mdash; an operator can move a feature from OpenAI to Bedrock without the consumer changing a line, at the cost of time-to-first-token.</figcaption>
+  </figure>
+
+  <h3>Where the risk lives</h3>
+  <p><code>SseParsers</code> is deliberately free of I/O: it takes the raw SSE lines a provider emitted and returns chunks, so each translation is tested against recorded provider output with no network call. Anthropic&rsquo;s frames are a different shape entirely &mdash; <code>content_block_delta</code> carrying <code>delta.text</code>, <code>message_delta</code> carrying the stop reason and output tokens &mdash; and its stop reasons are mapped into OpenAI&rsquo;s vocabulary.</p>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>Anthropic stop reason</th><th>OpenAI finish reason</th></tr></thead>
+      <tbody>
+        <tr><td>end_turn</td><td>stop</td></tr>
+        <tr><td>stop_sequence</td><td>stop</td></tr>
+        <tr><td>max_tokens</td><td>length</td></tr>
+        <tr><td>tool_use</td><td>tool_calls</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>A malformed frame is skipped rather than failing the stream: providers emit keep-alive comments and blank lines, and one unparseable frame should not discard tokens the client already has.</p>
+
+  <div class="note">
+    <p><strong>Failover stops at the first byte.</strong> Acquiring a pacing slot and getting the provider to start answering are retried down the chain as usual. Once the first chunk has reached the client there is no honest way to switch providers, so a mid-stream failure ends the stream.</p>
+    <p><strong>Token counts arrive last.</strong> <code>usage</code> rides on the terminating chunk, so a streaming attempt only learns its cost once the client drains the stream &mdash; which is why the lineage derives <code>billed_total_tokens</code> from its attempts on read rather than accumulating it on write.</p>
   </div>
 </section>
 

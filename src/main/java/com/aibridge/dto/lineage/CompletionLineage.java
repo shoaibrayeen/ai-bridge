@@ -58,7 +58,7 @@ public class CompletionLineage {
                 + " routing=" + routing
                 + " chain=" + chainLength
                 + " totalMs=" + totalDurationMs
-                + " billedTokens=" + billedTotalTokens
+                + " billedTokens=" + getBilledTotalTokens()
                 + " path=[" + attempts.stream().map(CallAttempt::toLogString).collect(Collectors.joining(" -> ")) + "]";
     }
 

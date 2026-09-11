@@ -13,5 +13,11 @@ public enum AttemptOutcome {
     /** Provider returned 5xx, or the call timed out. Advances the chain. */
     UNAVAILABLE,
     /** No adapter is registered for the config's provider. Advances the chain. */
-    NO_ADAPTER
+    NO_ADAPTER,
+
+    /**
+     * An unexpected failure — a misconfiguration or a bug, not a provider outage. Recorded and
+     * rethrown rather than failed over: trying the next provider would hide the cause.
+     */
+    ERROR
 }

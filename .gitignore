@@ -38,8 +38,20 @@ src/main/resources/META-INF/resources/
 Thumbs.db
 
 # --- Environment / secrets ---
+# .env holds real credentials and must never be committed. .env.example is the
+# committed template and is the only exception.
 .env
 .env.*
+*.env
 !.env.example
+!.env.example.*
+
+# Credential material of any kind
 *.pem
 *.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets.json
+credentials.json

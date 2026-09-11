@@ -139,6 +139,15 @@ public class ChatCompletionService {
             } catch (ProviderUnavailableException e) {
                 LOG.warning("Provider unavailable for config id=" + config.getId() + ": " + e.getMessage());
                 finish(lineage, attempt, startedAt, AttemptOutcome.UNAVAILABLE, e.getMessage());
+            } catch (RuntimeException e) {
+                // A misconfiguration or a bug, not a provider outage — a bad encryption key or
+                // malformed credentials JSON would fail identically on every config. Failing over
+                // would bury the cause, so record it, make sure the lineage still reaches the log,
+                // and rethrow.
+                LOG.severe("Unexpected failure for config id=" + config.getId() + ": " + e);
+                finish(lineage, attempt, startedAt, AttemptOutcome.ERROR, e.getMessage());
+                logLineage(lineage);
+                throw e;
             }
         }
 
@@ -210,6 +219,14 @@ public class ChatCompletionService {
             } catch (ProviderUnavailableException e) {
                 LOG.warning("Provider unavailable for config id=" + config.getId() + ": " + e.getMessage());
                 finish(lineage, attempt, startedAt, AttemptOutcome.UNAVAILABLE, e.getMessage());
+            } catch (RuntimeException e) {
+                // A misconfiguration or a bug, not a provider outage. Failing over would try the
+                // next provider and bury the cause, so record it, make sure the lineage still
+                // reaches the log, and rethrow.
+                LOG.severe("Unexpected failure for config id=" + config.getId() + ": " + e);
+                finish(lineage, attempt, startedAt, AttemptOutcome.ERROR, e.getMessage());
+                logLineage(lineage);
+                throw e;
             }
         }
 

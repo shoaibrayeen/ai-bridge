@@ -187,6 +187,12 @@ prompt/completion/total tokens that attempt consumed.
 | `RATE_LIMITED` | no — advances the chain |
 | `UNAVAILABLE` | no — advances the chain |
 | `NO_ADAPTER` | no — advances the chain |
+| `ERROR` | yes — recorded, logged and rethrown, never failed over |
+
+`ERROR` covers anything that is a misconfiguration or a bug rather than a provider outage — a bad
+encryption key, malformed credentials JSON. Those fail identically on every config in the chain, so
+failing over would only bury the cause. The attempt is recorded, the lineage is logged, and the
+exception is rethrown.
 
 The lineage is always logged as one line alongside the `X-Request-ID`, including on chain
 exhaustion, where the caller only sees a 502. It reaches the response body as `x_aibridge_lineage`
@@ -195,6 +201,43 @@ OpenAI response.
 
 `billed_total_tokens` sums every attempt rather than only the successful one, so tokens burned by a
 provider that later failed over remain visible.
+
+## 3d. Streaming
+
+`"stream": true` switches the response to `text/event-stream` in the OpenAI wire format: one
+`data:` line per `chat.completion.chunk`, terminated by `data: [DONE]`.
+
+```mermaid
+flowchart LR
+    Req["stream: true"] --> Svc["ChatCompletionService.completeStream"]
+    Svc --> Pace["acquire pacing slot"]
+    Pace --> Ad{"adapter.supportsNativeStreaming()"}
+    Ad -->|"true — OpenAI, Cerebras, Claude"| Native["provider SSE → SseParsers → chunks"]
+    Ad -->|"false — watsonx, Bedrock"| Fallback["blocking complete() →<br/>role + content + final chunk"]
+    Native --> Out["data: {chunk}\n\n … data: [DONE]"]
+    Fallback --> Out
+```
+
+**Two protocols, one output.** `SseParsers` is deliberately free of I/O — it takes the raw SSE
+lines a provider emitted and returns chunks, so each translation is tested against recorded
+provider output with no network call.
+
+- *OpenAI-compatible* frames are already the target shape; the only work is re-stamping `model`
+  with the gateway name and stopping at the sentinel.
+- *Anthropic* frames are a different shape entirely — `message_start`, `content_block_delta`
+  carrying `delta.text`, `message_delta` with the stop reason and output tokens. Stop reasons are
+  mapped into OpenAI's vocabulary (`max_tokens` → `length`, `tool_use` → `tool_calls`).
+
+A malformed frame is skipped rather than failing the stream: providers emit keep-alive comments and
+blank lines, and one unparseable frame should not discard tokens the client already has.
+
+**Failover boundary.** Failover covers *establishing* the stream — acquiring a pacing slot and
+getting the provider to start answering. Once the first chunk reaches the client, bytes are on the
+wire and there is no honest way to switch providers, so a mid-stream failure ends the stream.
+
+**Token accounting.** `usage` rides on the terminating chunk, so a streaming attempt only learns
+its token count once the client drains the stream. The lineage's `billedTotalTokens` is therefore
+derived from the attempts on read rather than accumulated on write.
 
 ## 4. Standardized API Contract (OpenAI Chat Completions Format)
 
