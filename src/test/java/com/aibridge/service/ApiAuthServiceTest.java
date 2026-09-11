@@ -12,6 +12,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import static org.mockito.ArgumentMatchers.startsWith;
+
 import com.aibridge.cache.CacheProvider;
 import com.aibridge.config.AiBridgeConfig;
 import java.lang.reflect.Field;
@@ -115,5 +117,86 @@ class ApiAuthServiceTest {
         when(cacheProvider.get("aibridge:api_token:tok")).thenReturn("invalid-value");
 
         assertFalse(apiAuthService.validateToken("tok"));
+    }
+
+    // =========================================================================
+    // Security: constant-time comparison and brute-force limiting.
+    // =========================================================================
+
+    @Test
+    void constantTimeEquals_matchesOnlyIdenticalSecrets() {
+        assertTrue(ApiAuthService.constantTimeEquals("secret", "secret"));
+        assertFalse(ApiAuthService.constantTimeEquals("secret", "secreu"));
+        assertFalse(ApiAuthService.constantTimeEquals("secret", "secret-longer"));
+        assertFalse(ApiAuthService.constantTimeEquals("", "secret"));
+    }
+
+    @Test
+    void constantTimeEquals_nullIsNeverEqual() {
+        assertFalse(ApiAuthService.constantTimeEquals(null, "secret"));
+        assertFalse(ApiAuthService.constantTimeEquals("secret", null));
+        assertFalse(ApiAuthService.constantTimeEquals(null, null));
+    }
+
+    @Test
+    void generateToken_clearsTheFailureCounterOnSuccess() {
+        when(config.getAuthApiKey()).thenReturn("right-key");
+        when(config.getAuthTokenValidityMinutes()).thenReturn(60);
+        when(cacheProvider.get("aibridge:auth_fail:1.2.3.4")).thenReturn("3");
+
+        String token = apiAuthService.generateToken("right-key", "1.2.3.4");
+
+        assertNotNull(token);
+        verify(cacheProvider).del("aibridge:auth_fail:1.2.3.4");
+    }
+
+    @Test
+    void generateToken_countsFailuresAgainstTheCaller() {
+        when(config.getAuthApiKey()).thenReturn("right-key");
+        when(cacheProvider.get("aibridge:auth_fail:1.2.3.4")).thenReturn(null);
+
+        assertNull(apiAuthService.generateToken("wrong-key", "1.2.3.4"));
+
+        verify(cacheProvider).setex("aibridge:auth_fail:1.2.3.4", 300L, "1");
+    }
+
+    @Test
+    void generateToken_incrementsAnExistingFailureCount() {
+        when(config.getAuthApiKey()).thenReturn("right-key");
+        when(cacheProvider.get("aibridge:auth_fail:1.2.3.4")).thenReturn("4");
+
+        assertNull(apiAuthService.generateToken("wrong-key", "1.2.3.4"));
+
+        verify(cacheProvider).setex("aibridge:auth_fail:1.2.3.4", 300L, "5");
+    }
+
+    @Test
+    void generateToken_lockedOutCallerIsRefusedWithoutComparingTheKey() {
+        when(cacheProvider.get("aibridge:auth_fail:1.2.3.4")).thenReturn("10");
+
+        assertNull(apiAuthService.generateToken("right-key", "1.2.3.4"));
+
+        // The correct key must not get through, and the key is never even read.
+        verify(config, never()).getAuthApiKey();
+        verify(cacheProvider, never()).setex(startsWith("aibridge:api_token:"), anyLong(), anyString());
+    }
+
+    @Test
+    void generateToken_corruptFailureCounterFailsClosed() {
+        when(cacheProvider.get("aibridge:auth_fail:1.2.3.4")).thenReturn("not-a-number");
+
+        assertNull(apiAuthService.generateToken("right-key", "1.2.3.4"));
+
+        verify(config, never()).getAuthApiKey();
+    }
+
+    @Test
+    void generateToken_withoutACallerIdSkipsFailureCounting() {
+        when(config.getAuthApiKey()).thenReturn("right-key");
+        when(config.getAuthTokenValidityMinutes()).thenReturn(60);
+
+        assertNotNull(apiAuthService.generateToken("right-key", null));
+
+        verify(cacheProvider, never()).get(startsWith("aibridge:auth_fail:"));
     }
 }

@@ -48,9 +48,6 @@ public class CompletionLineage {
     public void add(CallAttempt attempt) {
         attempts.add(attempt);
         totalDurationMs += attempt.getDurationMs();
-        if (attempt.getTotalTokens() != null) {
-            billedTotalTokens = (billedTotalTokens == null ? 0 : billedTotalTokens) + attempt.getTotalTokens();
-        }
     }
 
     /** Compact one-line form for logs. */
@@ -121,8 +118,21 @@ public class CompletionLineage {
         this.totalDurationMs = totalDurationMs;
     }
 
+    /**
+     * Derived from the attempts rather than accumulated, because a streaming attempt only learns
+     * its token count once the client has drained the stream — long after the attempt was added.
+     */
     public Integer getBilledTotalTokens() {
-        return billedTotalTokens;
+        if (billedTotalTokens != null) {
+            return billedTotalTokens;
+        }
+        Integer sum = null;
+        for (CallAttempt attempt : attempts) {
+            if (attempt.getTotalTokens() != null) {
+                sum = (sum == null ? 0 : sum) + attempt.getTotalTokens();
+            }
+        }
+        return sum;
     }
 
     public void setBilledTotalTokens(Integer billedTotalTokens) {

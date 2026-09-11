@@ -11,7 +11,10 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import java.util.Map;
 
 @ApplicationScoped
@@ -26,6 +29,9 @@ public class AuthResource {
     @Inject
     AiBridgeConfig config;
 
+    @Context
+    HttpHeaders httpHeaders;
+
     @POST
     @Path("/token")
     public Response generateToken(AuthRequest request) {
@@ -34,12 +40,44 @@ public class AuthResource {
                     .entity(Map.of("error", "api_key is required"))
                     .build();
         }
-        String token = apiAuthService.generateToken(request.getApiKey());
+        String token = apiAuthService.generateToken(request.getApiKey(), callerId());
         if (token == null) {
+            // A locked-out caller and a wrong key look identical from outside, so probing cannot
+            // tell an attacker whether they have exhausted their budget.
             return Response.status(Response.Status.UNAUTHORIZED)
                     .entity(Map.of("error", "Invalid API key"))
                     .build();
         }
         return Response.ok(new AuthResponse(token, config.getAuthTokenValidityMinutes())).build();
+    }
+
+    /**
+     * Identifies the caller for failure counting. Behind a proxy the socket address is the proxy's,
+     * so the first hop in {@code X-Forwarded-For} is preferred when present. This is a rate-limit
+     * key, not an authentication signal — a spoofed value only lets an attacker choose which
+     * bucket they exhaust.
+     */
+    private String callerId() {
+        if (httpHeaders == null) {
+            return null;
+        }
+        String forwarded = httpHeaders.getHeaderString("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            String first = forwarded.split(",")[0].trim();
+            if (!first.isEmpty()) {
+                return sanitise(first);
+            }
+        }
+        String realIp = httpHeaders.getHeaderString("X-Real-IP");
+        if (realIp != null && !realIp.isBlank()) {
+            return sanitise(realIp.trim());
+        }
+        return "unknown";
+    }
+
+    /** Keeps a hostile header out of the cache key namespace. */
+    private static String sanitise(String value) {
+        String trimmed = value.length() > 64 ? value.substring(0, 64) : value;
+        return trimmed.replaceAll("[^A-Za-z0-9._:\\[\\]-]", "_");
     }
 }

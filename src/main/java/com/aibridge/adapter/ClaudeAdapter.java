@@ -1,5 +1,6 @@
 package com.aibridge.adapter;
 
+import com.aibridge.dto.openai.ChatCompletionChunk;
 import com.aibridge.dto.openai.ChatCompletionRequest;
 import com.aibridge.dto.openai.ChatCompletionResponse;
 import com.aibridge.dto.openai.ChatMessage;
@@ -23,6 +24,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.UUID;
+import java.util.stream.Stream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,77 +54,10 @@ public class ClaudeAdapter implements LlmProviderAdapter {
 
     @Override
     public ChatCompletionResponse complete(ChatCompletionRequest request, LlmConfig config) {
-        String decrypted = encryptionService.decrypt(config.getCredentialsEncrypted());
-        JsonNode creds;
-        try {
-            creds = objectMapper.readTree(decrypted);
-        } catch (IOException e) {
-            throw new IllegalStateException("Invalid credentials JSON", e);
-        }
-        JsonNode apiKeyNode = creds.get("api_key");
-        if (apiKeyNode == null || apiKeyNode.asText().isBlank()) {
-            throw new IllegalStateException("Missing api_key in credentials");
-        }
-        String apiKey = apiKeyNode.asText();
+        String apiKey = readApiKey(config);
 
-        List<String> systemParts = new ArrayList<>();
-        ArrayNode claudeMessages = objectMapper.createArrayNode();
-        if (request.getMessages() != null) {
-            for (ChatMessage m : request.getMessages()) {
-                if (m == null || m.getRole() == null) {
-                    continue;
-                }
-                String role = m.getRole().toLowerCase();
-                String content = m.getContent() == null ? "" : m.getContent();
-                if ("system".equals(role)) {
-                    systemParts.add(content);
-                } else if ("user".equals(role) || "assistant".equals(role)) {
-                    ObjectNode msg = objectMapper.createObjectNode();
-                    msg.put("role", role);
-                    ArrayNode contentArr = objectMapper.createArrayNode();
-                    ObjectNode textBlock = objectMapper.createObjectNode();
-                    textBlock.put("type", "text");
-                    textBlock.put("text", content);
-                    contentArr.add(textBlock);
-                    msg.set("content", contentArr);
-                    claudeMessages.add(msg);
-                }
-            }
-        }
-
-        if (claudeMessages.isEmpty()) {
-            ObjectNode msg = objectMapper.createObjectNode();
-            msg.put("role", "user");
-            ArrayNode contentArr = objectMapper.createArrayNode();
-            ObjectNode textBlock = objectMapper.createObjectNode();
-            textBlock.put("type", "text");
-            textBlock.put("text", "");
-            contentArr.add(textBlock);
-            msg.set("content", contentArr);
-            claudeMessages.add(msg);
-        }
-
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("model", config.getModelName());
-        int maxTokens =
-                request.getMaxTokens() != null && request.getMaxTokens() > 0
-                        ? request.getMaxTokens()
-                        : 1024;
-        body.put("max_tokens", maxTokens);
-        if (request.getTemperature() != null) {
-            body.put("temperature", request.getTemperature());
-        }
-        if (!systemParts.isEmpty()) {
-            body.put("system", String.join("\n\n", systemParts));
-        }
-        body.set("messages", claudeMessages);
-
-        String json;
-        try {
-            json = objectMapper.writeValueAsString(body);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to serialize Claude request", e);
-        }
+        ObjectNode body = buildClaudeBody(request, config);
+        String json = serialise(body);
 
         String url = config.getEndpointUrl().trim();
         HttpRequest httpRequest =
@@ -209,5 +145,133 @@ public class ClaudeAdapter implements LlmProviderAdapter {
             return "stop";
         }
         return stopReason;
+    }
+
+    @Override
+    public boolean supportsNativeStreaming() {
+        return true;
+    }
+
+    @Override
+    public Stream<ChatCompletionChunk> completeStream(ChatCompletionRequest request, LlmConfig config) {
+        String apiKey = readApiKey(config);
+        ObjectNode body = buildClaudeBody(request, config);
+        body.put("stream", true);
+        String json = serialise(body);
+
+        HttpRequest httpRequest =
+                HttpRequest.newBuilder(URI.create(config.getEndpointUrl().trim()))
+                        .timeout(Duration.ofSeconds(300))
+                        .header("x-api-key", apiKey)
+                        .header("anthropic-version", ANTHROPIC_VERSION)
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "text/event-stream")
+                        .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                        .build();
+
+        try {
+            HttpResponse<Stream<String>> response =
+                    httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofLines());
+            int status = response.statusCode();
+            if (status == 429) {
+                throw new ProviderRateLimitException("Claude returned 429");
+            }
+            if (status >= 400) {
+                throw new ProviderUnavailableException("Claude returned HTTP " + status);
+            }
+            String gatewayModel = config.getGatewayModelName() != null
+                    ? config.getGatewayModelName()
+                    : config.getModelName();
+            String id = "chatcmpl-" + UUID.randomUUID();
+            try (Stream<String> lines = response.body()) {
+                return SseParsers.parseAnthropic(lines.toList(), id, gatewayModel, objectMapper)
+                        .stream();
+            }
+        } catch (IOException e) {
+            throw new ProviderUnavailableException("Claude stream failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ProviderUnavailableException("Claude stream interrupted", e);
+        }
+    }
+
+    /**
+     * Builds Anthropic's request shape: the system prompt is lifted out of {@code messages} into
+     * its own field, and each remaining message becomes a single text content block.
+     */
+    private ObjectNode buildClaudeBody(ChatCompletionRequest request, LlmConfig config) {
+        List<String> systemParts = new ArrayList<>();
+        ArrayNode claudeMessages = objectMapper.createArrayNode();
+        if (request.getMessages() != null) {
+            for (ChatMessage m : request.getMessages()) {
+                if (m == null || m.getRole() == null) {
+                    continue;
+                }
+                String role = m.getRole().toLowerCase();
+                String content = m.getContent() == null ? "" : m.getContent();
+                if ("system".equals(role)) {
+                    systemParts.add(content);
+                } else if ("user".equals(role) || "assistant".equals(role)) {
+                    ObjectNode msg = objectMapper.createObjectNode();
+                    msg.put("role", role);
+                    ArrayNode contentArr = objectMapper.createArrayNode();
+                    ObjectNode textBlock = objectMapper.createObjectNode();
+                    textBlock.put("type", "text");
+                    textBlock.put("text", content);
+                    contentArr.add(textBlock);
+                    msg.set("content", contentArr);
+                    claudeMessages.add(msg);
+                }
+            }
+        }
+        if (claudeMessages.isEmpty()) {
+            ObjectNode msg = objectMapper.createObjectNode();
+            msg.put("role", "user");
+            ArrayNode contentArr = objectMapper.createArrayNode();
+            ObjectNode textBlock = objectMapper.createObjectNode();
+            textBlock.put("type", "text");
+            textBlock.put("text", "");
+            contentArr.add(textBlock);
+            msg.set("content", contentArr);
+            claudeMessages.add(msg);
+        }
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("model", config.getModelName());
+        int maxTokens =
+                request.getMaxTokens() != null && request.getMaxTokens() > 0
+                        ? request.getMaxTokens()
+                        : 1024;
+        body.put("max_tokens", maxTokens);
+        if (request.getTemperature() != null) {
+            body.put("temperature", request.getTemperature());
+        }
+        if (!systemParts.isEmpty()) {
+            body.put("system", String.join("\n\n", systemParts));
+        }
+        body.set("messages", claudeMessages);
+        return body;
+    }
+
+    private String serialise(ObjectNode body) {
+        try {
+            return objectMapper.writeValueAsString(body);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to serialize Claude request", e);
+        }
+    }
+
+    private String readApiKey(LlmConfig config) {
+        String decrypted = encryptionService.decrypt(config.getCredentialsEncrypted());
+        JsonNode creds;
+        try {
+            creds = objectMapper.readTree(decrypted);
+        } catch (IOException e) {
+            throw new IllegalStateException("Invalid credentials JSON", e);
+        }
+        JsonNode apiKeyNode = creds.get("api_key");
+        if (apiKeyNode == null || apiKeyNode.asText().isBlank()) {
+            throw new IllegalStateException("Missing api_key in credentials");
+        }
+        return apiKeyNode.asText();
     }
 }

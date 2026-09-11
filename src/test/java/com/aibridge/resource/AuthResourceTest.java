@@ -2,6 +2,8 @@ package com.aibridge.resource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,7 +36,7 @@ class AuthResourceTest {
 
     @Test
     void generateToken_withValidApiKey_returnsOkWithToken() {
-        when(apiAuthService.generateToken("my-key")).thenReturn("tok-123");
+        when(apiAuthService.generateToken(eq("my-key"), any())).thenReturn("tok-123");
         when(config.getAuthTokenValidityMinutes()).thenReturn(60);
 
         AuthRequest request = new AuthRequest("my-key");
@@ -48,7 +50,7 @@ class AuthResourceTest {
 
     @Test
     void generateToken_withInvalidApiKey_returns401() {
-        when(apiAuthService.generateToken("bad-key")).thenReturn(null);
+        when(apiAuthService.generateToken(eq("bad-key"), any())).thenReturn(null);
 
         AuthRequest request = new AuthRequest("bad-key");
         Response res = authResource.generateToken(request);
@@ -63,7 +65,7 @@ class AuthResourceTest {
         Response res = authResource.generateToken(null);
 
         assertEquals(400, res.getStatus());
-        verify(apiAuthService, never()).generateToken(anyString());
+        verify(apiAuthService, never()).generateToken(anyString(), any());
     }
 
     @Test
@@ -72,7 +74,7 @@ class AuthResourceTest {
         Response res = authResource.generateToken(request);
 
         assertEquals(400, res.getStatus());
-        verify(apiAuthService, never()).generateToken(anyString());
+        verify(apiAuthService, never()).generateToken(anyString(), any());
     }
 
     @Test
@@ -81,6 +83,6 @@ class AuthResourceTest {
         Response res = authResource.generateToken(request);
 
         assertEquals(400, res.getStatus());
-        verify(apiAuthService, never()).generateToken(anyString());
+        verify(apiAuthService, never()).generateToken(anyString(), any());
     }
 }

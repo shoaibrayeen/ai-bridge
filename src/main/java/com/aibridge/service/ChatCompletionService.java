@@ -1,6 +1,7 @@
 package com.aibridge.service;
 
 import com.aibridge.adapter.LlmProviderAdapter;
+import com.aibridge.dto.openai.ChatCompletionChunk;
 import com.aibridge.dto.openai.ChatCompletionRequest;
 import com.aibridge.dto.openai.ChatCompletionResponse;
 import com.aibridge.dto.openai.Choice;
@@ -21,6 +22,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.stream.Stream;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -142,6 +144,95 @@ public class ChatCompletionService {
 
         logLineage(lineage);
         throw new ProviderUnavailableException("All LLM providers in failover chain exhausted");
+    }
+
+    /**
+     * Streaming counterpart of {@link #complete}.
+     *
+     * <p>Failover applies to <em>establishing</em> the stream — acquiring a pacing slot and getting
+     * the provider to start answering. Once the first chunk has been handed to the client, bytes
+     * are already on the wire and there is no honest way to switch providers, so a mid-stream
+     * failure ends the stream rather than retrying.
+     *
+     * <p>Providers whose streaming protocol this gateway does not speak still produce a valid
+     * stream: the adapter default makes the blocking call and emits the answer as one chunk.
+     */
+    public StreamingCompletion completeStream(
+            String tenantId, String feature, ChatCompletionRequest request) {
+        boolean modelPinned =
+                request != null && GatewayModelNameService.isGatewayModelName(request.getModel());
+        List<LlmConfig> chain = resolveChain(tenantId, feature, request, modelPinned);
+
+        CompletionLineage lineage = new CompletionLineage();
+        lineage.setRequestId(RequestCorrelationFilter.currentRequestId());
+        lineage.setTenantId(tenantId);
+        lineage.setFeature(feature);
+        lineage.setRouting(modelPinned ? CompletionLineage.ROUTING_MODEL : CompletionLineage.ROUTING_FEATURE);
+        lineage.setChainLength(chain.size());
+
+        int position = 0;
+        for (LlmConfig config : chain) {
+            position++;
+            CallAttempt attempt = newAttempt(position, config);
+            long startedAt = System.nanoTime();
+
+            ChatCompletionRequest mergedRequest = parameterMergeService.merge(request, config);
+
+            try {
+                requestPacingService.acquireSlot(config);
+            } catch (QueueTimeoutException e) {
+                LOG.warning("Queue timeout for config id=" + config.getId() + ": " + e.getMessage());
+                finish(lineage, attempt, startedAt, AttemptOutcome.QUEUE_TIMEOUT, e.getMessage());
+                continue;
+            }
+
+            ProviderName providerName = config.getProvider().getName();
+            LlmProviderAdapter adapter = adapterByProvider.get(providerName);
+            if (adapter == null) {
+                LOG.warning("No adapter registered for provider " + providerName);
+                finish(lineage, attempt, startedAt, AttemptOutcome.NO_ADAPTER,
+                        "No adapter registered for provider " + providerName);
+                continue;
+            }
+
+            try {
+                Stream<ChatCompletionChunk> raw = adapter.completeStream(mergedRequest, config);
+                // Usage rides on the terminating chunk, so it is captured as the client drains
+                // the stream. The attempt is already in the lineage by reference, and
+                // billedTotalTokens is derived, so a late arrival still counts.
+                Stream<ChatCompletionChunk> chunks = raw.peek(chunk -> captureUsage(attempt, chunk));
+                finish(lineage, attempt, startedAt, AttemptOutcome.SUCCESS, null);
+                logLineage(lineage);
+                return new StreamingCompletion(chunks, lineage, config);
+            } catch (ProviderRateLimitException e) {
+                LOG.warning("Provider rate limit for config id=" + config.getId() + ": " + e.getMessage());
+                finish(lineage, attempt, startedAt, AttemptOutcome.RATE_LIMITED, e.getMessage());
+            } catch (ProviderUnavailableException e) {
+                LOG.warning("Provider unavailable for config id=" + config.getId() + ": " + e.getMessage());
+                finish(lineage, attempt, startedAt, AttemptOutcome.UNAVAILABLE, e.getMessage());
+            }
+        }
+
+        logLineage(lineage);
+        throw new ProviderUnavailableException("All LLM providers in failover chain exhausted");
+    }
+
+    private static void captureUsage(CallAttempt attempt, ChatCompletionChunk chunk) {
+        Usage usage = chunk == null ? null : chunk.getUsage();
+        if (usage == null) {
+            return;
+        }
+        attempt.setPromptTokens(usage.getPromptTokens());
+        attempt.setCompletionTokens(usage.getCompletionTokens());
+        attempt.setTotalTokens(usage.getTotalTokens());
+    }
+
+    /**
+     * A stream of chunks plus the lineage that produced it. The lineage keeps accumulating token
+     * detail as the stream drains, so it is only complete once the client has read to the end.
+     */
+    public record StreamingCompletion(
+            Stream<ChatCompletionChunk> chunks, CompletionLineage lineage, LlmConfig config) {
     }
 
     private static CallAttempt newAttempt(int position, LlmConfig config) {
