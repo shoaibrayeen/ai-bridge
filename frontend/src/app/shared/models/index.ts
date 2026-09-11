@@ -28,6 +28,8 @@ export interface LlmConfig {
   tenant_id?: string | null;
   provider_id: string;
   model_name: string;
+  /** Service-wide unique name, e.g. `ai-bridge-2-claude-sonnet-6`. Assigned by the backend. */
+  gateway_model_name?: string | null;
   endpoint_url: string;
   credentials?: string | null;
   rps_limit?: number | null;

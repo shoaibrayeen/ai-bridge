@@ -2,30 +2,60 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_DB: aibridge
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-aibridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-aibridge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Optional: uncomment to run the app in Docker alongside dependencies
-  # aibridge:
-  #   build: .
-  #   ports:
-  #     - "8080:8080"
-  #   depends_on:
-  #     - postgres
-  #     - redis
-  #   environment:
-  #     QUARKUS_PROFILE: docker
+  # The application itself. `docker compose up -d --build` brings up all three.
+  # For local backend development against containerised dependencies only, run:
+  #   docker compose up -d postgres redis
+  aibridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_UI: "true"
+    ports:
+      - "${QUARKUS_HTTP_PORT:-8080}:8080"
+    env_file:
+      - .env
+    # These win over .env: inside the compose network the dependencies are
+    # reached by service name, not localhost.
+    environment:
+      QUARKUS_PROFILE: docker
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-aibridge}
+      QUARKUS_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      QUARKUS_REDIS_HOSTS: redis://redis:6379
+      QUARKUS_HTTP_PORT: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   pgdata:
+  redisdata:

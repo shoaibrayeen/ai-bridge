@@ -1,0 +1,30 @@
+# Build output
+target/
+frontend/dist/
+frontend/.angular/
+frontend/node_modules/
+node_modules/
+
+# The UI bundle is produced inside the image by the `ui` stage
+src/main/resources/META-INF/resources/
+
+# Secrets — never bake these into an image layer
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# VCS / IDE / OS
+.git/
+.gitignore
+.idea/
+.vscode/
+.cursor/
+*.iml
+.DS_Store
+
+# Docs
+*.md
+docker-compose.yml
+Dockerfile

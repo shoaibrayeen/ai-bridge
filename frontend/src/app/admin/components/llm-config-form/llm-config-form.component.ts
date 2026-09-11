@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import {
   AbstractControl,
   FormBuilder,
@@ -60,6 +60,13 @@ function jsonObjectValidator(control: AbstractControl): ValidationErrors | null 
         <div class="form-group">
           <label class="form-label">Model name *</label>
           <input type="text" class="form-input" formControlName="model_name" />
+          @if (gatewayModelName()) {
+            <small class="form-hint">
+              Gateway model name: <code>{{ gatewayModelName() }}</code>
+              — send this in the OpenAI <code>model</code> field to pin a request to this config.
+              Changing the model above assigns a new one.
+            </small>
+          }
           @if (form.controls.model_name.touched && form.controls.model_name.invalid) {
             <span class="form-error">Required</span>
           }
@@ -166,6 +173,9 @@ export class LlmConfigFormComponent implements OnInit {
 
   providers: LlmProvider[] = [];
   configId: string | null = null;
+
+  /** Assigned by the backend on save; read-only here. Empty until an existing config loads. */
+  readonly gatewayModelName = signal<string | null>(null);
   isCreate = true;
   loadingConfig = false;
   loadError: string | null = null;
@@ -189,6 +199,7 @@ export class LlmConfigFormComponent implements OnInit {
     this.loadingConfig = true; this.loadError = null;
     this.api.getConfig(id).pipe(finalize(() => (this.loadingConfig = false))).subscribe({
       next: (c) => {
+        this.gatewayModelName.set(c.gateway_model_name ?? null);
         this.form.patchValue({
           tenant_id: c.tenant_id ?? '', provider: c.provider_name ?? '', model_name: c.model_name,
           endpoint_url: c.endpoint_url, credentials: CREDENTIALS_PLACEHOLDER,

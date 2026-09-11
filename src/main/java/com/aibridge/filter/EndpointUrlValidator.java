@@ -135,8 +135,21 @@ public class EndpointUrlValidator {
     }
 
     /**
-     * Allowlist entries are compared case-insensitively. A leading {@code *.} prefix matches any
-     * host suffix (e.g. {@code *.cloud.ibm.com} matches {@code us-south.ml.cloud.ibm.com}).
+     * Allowlist entries are compared case-insensitively and support two wildcard forms:
+     *
+     * <ul>
+     *   <li>A leading {@code *.} matches the domain itself and any subdomain —
+     *       {@code *.cloud.ibm.com} matches both {@code cloud.ibm.com} and
+     *       {@code us-south.ml.cloud.ibm.com}.</li>
+     *   <li>A {@code *} standing as a whole label matches exactly one label and never crosses a
+     *       dot — {@code bedrock-runtime.*.amazonaws.com} matches
+     *       {@code bedrock-runtime.us-east-1.amazonaws.com} but not
+     *       {@code bedrock-runtime.a.b.amazonaws.com}, and cannot be widened into a lookalike
+     *       domain because every other label stays pinned.</li>
+     * </ul>
+     *
+     * <p>A bare {@code *} is deliberately inert: an entry that would allow every host is far more
+     * likely to be a mistake than an intent, and silently honouring it defeats the allowlist.
      */
     static boolean hostMatchesAllowlist(String host, List<String> patterns) {
         String h = host.toLowerCase(Locale.ROOT);
@@ -145,15 +158,19 @@ public class EndpointUrlValidator {
                 continue;
             }
             String p = raw.trim().toLowerCase(Locale.ROOT);
-            if (p.isEmpty()) {
+            if (p.isEmpty() || "*".equals(p)) {
                 continue;
             }
             if (p.startsWith("*.")) {
                 String suffix = p.substring(2);
-                if (suffix.isEmpty()) {
+                if (suffix.isEmpty() || suffix.contains("*")) {
                     continue;
                 }
                 if (h.equals(suffix) || h.endsWith("." + suffix)) {
+                    return true;
+                }
+            } else if (p.indexOf('*') >= 0) {
+                if (labelWildcardMatches(h, p)) {
                     return true;
                 }
             } else if (h.equals(p)) {
@@ -161,5 +178,33 @@ public class EndpointUrlValidator {
             }
         }
         return false;
+    }
+
+    /**
+     * Label-by-label comparison where a {@code *} label matches any single non-empty label.
+     * Label counts must be equal, so a wildcard can never absorb extra labels.
+     */
+    private static boolean labelWildcardMatches(String host, String pattern) {
+        String[] hostLabels = host.split("\\.", -1);
+        String[] patternLabels = pattern.split("\\.", -1);
+        if (hostLabels.length != patternLabels.length) {
+            return false;
+        }
+        for (int i = 0; i < patternLabels.length; i++) {
+            String pl = patternLabels[i];
+            String hl = hostLabels[i];
+            if ("*".equals(pl)) {
+                if (hl.isEmpty()) {
+                    return false;
+                }
+            } else if (pl.indexOf('*') >= 0) {
+                // Partial-label wildcards (e.g. "api-*.example.com") are not supported; treating
+                // them as literals is the safe reading.
+                return false;
+            } else if (!pl.equals(hl)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

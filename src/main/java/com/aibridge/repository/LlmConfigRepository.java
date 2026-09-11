@@ -38,6 +38,43 @@ public class LlmConfigRepository implements PanacheRepositoryBase<LlmConfig, UUI
         return list("tenantId", tenantId);
     }
 
+    /**
+     * Next free sequence number for a model slug. Takes a transaction-scoped advisory lock on the
+     * slug first, so two concurrent admin creates cannot read the same maximum; the unique index on
+     * {@code (model_slug, model_sequence)} remains the hard guarantee.
+     */
+    public int nextSequenceForSlug(String slug) {
+        getEntityManager()
+                .createNativeQuery("SELECT pg_advisory_xact_lock(CAST(?1 AS bigint))")
+                .setParameter(1, (long) slug.hashCode())
+                .getSingleResult();
+        Integer max = getEntityManager()
+                .createQuery(
+                        "SELECT MAX(c.modelSequence) FROM LlmConfig c WHERE c.modelSlug = :slug",
+                        Integer.class)
+                .setParameter("slug", slug)
+                .getSingleResult();
+        return max == null ? 1 : max + 1;
+    }
+
+    /** Looks up an active config by its gateway-unique model name. */
+    public LlmConfig findActiveByGatewayModelName(String gatewayModelName) {
+        return find("gatewayModelName = ?1 AND isActive = true", gatewayModelName).firstResult();
+    }
+
+    /**
+     * Every active config a tenant may address: its own, plus the global ones. Ordered so the
+     * listing is stable across calls.
+     */
+    public List<LlmConfig> listActiveVisibleTo(String tenantId) {
+        if (tenantId == null) {
+            return list("isActive = true AND tenantId IS NULL ORDER BY gatewayModelName");
+        }
+        return list(
+                "isActive = true AND (tenantId = ?1 OR tenantId IS NULL) ORDER BY gatewayModelName",
+                tenantId);
+    }
+
     public List<LlmConfig> listByFeature(String feature) {
         return list(
                 "SELECT DISTINCT c FROM LlmConfig c JOIN c.features f WHERE f.feature = ?1",

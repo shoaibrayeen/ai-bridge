@@ -3,6 +3,7 @@ package com.aibridge.resource;
 import com.aibridge.dto.openai.ChatCompletionRequest;
 import com.aibridge.dto.openai.ChatCompletionResponse;
 import com.aibridge.service.ChatCompletionService;
+import com.aibridge.service.GatewayModelNameService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -27,17 +28,26 @@ public class ChatCompletionResource {
     @Inject
     ChatCompletionService chatCompletionService;
 
+    /** Opt-in header for returning the routing trail alongside the completion. */
+    public static final String HEADER_INCLUDE_LINEAGE = "X-Include-Lineage";
+
     @POST
     public Response complete(
             @HeaderParam("X-Tenant-ID") String tenantId,
             @HeaderParam("X-Feature") String feature,
+            @HeaderParam(HEADER_INCLUDE_LINEAGE) String includeLineage,
             @Valid ChatCompletionRequest request) {
-        if (feature == null || feature.isBlank()) {
+        // A gateway model name in the payload selects a config on its own, so X-Feature is only
+        // required when the caller is relying on feature-based routing.
+        boolean modelPinned =
+                request != null && GatewayModelNameService.isGatewayModelName(request.getModel());
+        if (!modelPinned && (feature == null || feature.isBlank())) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", "X-Feature header is required"))
+                    .entity(Map.of("error", "X-Feature header is required unless model names an "
+                            + GatewayModelNameService.PREFIX + "* config"))
                     .build();
         }
-        if (!SAFE_HEADER.matcher(feature).matches()) {
+        if (feature != null && !feature.isBlank() && !SAFE_HEADER.matcher(feature).matches()) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "Invalid X-Feature header"))
                     .build();
@@ -49,6 +59,15 @@ public class ChatCompletionResource {
         }
         String resolvedTenant = (tenantId == null || tenantId.isBlank()) ? null : tenantId;
         ChatCompletionResponse body = chatCompletionService.complete(resolvedTenant, feature, request);
+        // The lineage is always built and logged; it only reaches the wire on request, so the
+        // default response stays byte-compatible with what an OpenAI client expects.
+        if (!isTruthy(includeLineage)) {
+            body.setLineage(null);
+        }
         return Response.ok(body).build();
+    }
+
+    private static boolean isTruthy(String header) {
+        return header != null && ("true".equalsIgnoreCase(header.trim()) || "1".equals(header.trim()));
     }
 }

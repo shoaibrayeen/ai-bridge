@@ -59,6 +59,27 @@ public class ConfigResolverService {
         return fromDb;
     }
 
+    /**
+     * Resolves the single config a gateway model name points at. Pinning a model selects exactly
+     * one config, so the returned chain has no fallback links — failover is a property of
+     * feature-based routing.
+     *
+     * <p>A tenant may address its own configs and the global ones. Naming another tenant's config
+     * is indistinguishable from naming one that does not exist.
+     */
+    public List<LlmConfig> resolveByGatewayModelName(String tenantId, String gatewayModelName) {
+        LlmConfig config = llmConfigRepository.findActiveByGatewayModelName(gatewayModelName);
+        if (config == null || !isAddressableBy(tenantId, config)) {
+            throw new ConfigNotFoundException(tenantId, "model=" + gatewayModelName);
+        }
+        return List.of(config);
+    }
+
+    private static boolean isAddressableBy(String tenantId, LlmConfig config) {
+        String owner = config.getTenantId();
+        return owner == null || owner.equals(tenantId);
+    }
+
     public void invalidateCache(String tenantId, String feature) {
         cacheProvider.del(RedisConfig.configCacheKey(tenantId, feature), RedisConfig.configCacheKey(null, feature));
     }

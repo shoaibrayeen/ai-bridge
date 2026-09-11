@@ -131,6 +131,71 @@ sequenceDiagram
 
 When an admin adds or updates an LLM config, the system first does a test call to the LLM provider with a simple prompt (e.g. "Say hello"). Only if the provider responds successfully is the config persisted to the database.
 
+## 3b. Gateway Model Identity & Routing
+
+Each `llm_config` row carries a service-wide unique name assigned on create:
+
+```
+ai-bridge-<sequence>-<slugified model_name>
+```
+
+`slugify` lowercases and replaces every run of non-alphanumeric characters with `-`, so
+`meta-llama/Llama-3 8B` becomes `meta-llama-llama-3-8b`. The sequence counts up **per slug**, not
+per raw model name, so two names that normalise identically cannot collide.
+
+This is what removes the old `UNIQUE(tenant_id, model_name, is_fallback)` limit: the same underlying
+model can now be registered any number of times, each instance addressable on its own.
+
+```mermaid
+flowchart TB
+    Req["POST /v1/chat/completions"] --> Check{"model starts with<br/>ai-bridge- ?"}
+    Check -->|yes| Pin["resolveByGatewayModelName(tenant, model)"]
+    Check -->|no| Feat["resolveChain(tenant, feature)"]
+    Pin --> One["Chain of exactly 1 config<br/>no failover"]
+    Feat --> Many["Ordered chain:<br/>tenant primary → tenant fallback →<br/>global primary → global fallback"]
+    One --> Walk["Walk the chain"]
+    Many --> Walk
+    Walk --> Resp["Response model = gateway model name"]
+```
+
+**Sequence allocation.** `LlmConfigRepository.nextSequenceForSlug` takes a transaction-scoped
+Postgres advisory lock keyed on the slug, then reads `MAX(model_sequence)` for that slug. The unique
+index on `(model_slug, model_sequence)` is the hard guarantee if the lock is ever bypassed.
+
+**Re-assignment.** Updating a config only re-derives the name when the model name normalises to a
+different slug. An unrelated edit (rate limit, credentials, features) leaves the name untouched, so
+clients pinning it are not broken.
+
+**Tenant isolation.** A gateway model name is globally unique, but a tenant may only address its own
+configs and the global ones. Naming another tenant's config returns 404, indistinguishable from a
+name that does not exist.
+
+**Discovery.** `GET /v1/models` returns the OpenAI list envelope scoped to the caller's tenant plus
+globals, so unmodified OpenAI SDKs can enumerate the gateway.
+
+## 3c. Request Lineage
+
+Every completion accumulates a `CompletionLineage` as it walks the chain — one `CallAttempt` per
+config touched, carrying the gateway model name, provider, outcome, wall-clock duration and the
+prompt/completion/total tokens that attempt consumed.
+
+| Outcome | Terminal? |
+|---------|-----------|
+| `SUCCESS` | yes |
+| `EMPTY_RESPONSE` | yes — returned as 200 |
+| `QUEUE_TIMEOUT` | no — advances the chain |
+| `RATE_LIMITED` | no — advances the chain |
+| `UNAVAILABLE` | no — advances the chain |
+| `NO_ADAPTER` | no — advances the chain |
+
+The lineage is always logged as one line alongside the `X-Request-ID`, including on chain
+exhaustion, where the caller only sees a 502. It reaches the response body as `x_aibridge_lineage`
+only when the request carries `X-Include-Lineage: true`, so the default payload stays a clean
+OpenAI response.
+
+`billed_total_tokens` sums every attempt rather than only the successful one, so tokens burned by a
+provider that later failed over remain visible.
+
 ## 4. Standardized API Contract (OpenAI Chat Completions Format)
 
 ### 4.1 Request (Input)
@@ -255,7 +320,16 @@ Returns HTTP **200** with an empty content field — never throws on empty provi
 - `created_at` — TIMESTAMP
 - `updated_at` — TIMESTAMP
 
-**Unique constraint:** `UNIQUE(tenant_id, model_name, is_fallback)` — a tenant cannot have duplicate primary or fallback entries for the same model.
+- `model_slug` — VARCHAR, normalised form of `model_name` (added in V2)
+- `model_sequence` — INTEGER, counts up per slug (added in V2)
+- `gateway_model_name` — VARCHAR, `ai-bridge-<sequence>-<slug>`, unique service-wide (added in V2)
+
+**Unique constraints:** `UNIQUE(gateway_model_name)` and `UNIQUE(model_slug, model_sequence)`.
+
+> **Changed in V2.** The original `UNIQUE(tenant_id, model_name, is_fallback)` index capped a tenant
+> at two rows per model name (one primary, one fallback) and is dropped by
+> `V2__gateway_model_name.sql`. Identity now lives on the gateway model name, so the same model can
+> be registered as many times as needed.
 
 ### 5.3 `features` — Feature-to-config mapping
 

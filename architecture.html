@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIBridge Gateway Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+
+<style>
+:root{
+  --ground:#f3f5f8; --surface:#ffffff; --surface-2:#e9edf2; --sunk:#eef1f5;
+  --ink:#121820; --ink-2:#4a5663; --ink-3:#74808d;
+  --rule:#d6dce4; --rule-2:#c2cad4;
+  --accent:#0b656f; --accent-2:#0e8794; --accent-soft:#dceef0;
+  --ok:#2b6b46; --ok-soft:#dcece3;
+  --warn:#8d5606; --warn-soft:#f3e7d4;
+  --crit:#9e2b22; --crit-soft:#f5e0dd;
+  --shadow:0 1px 2px rgba(18,24,32,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0c1116; --surface:#141b22; --surface-2:#1c252e; --sunk:#101820;
+    --ink:#e3e9ef; --ink-2:#a2aeba; --ink-3:#77838f;
+    --rule:#27323d; --rule-2:#35424f;
+    --accent:#54c6d2; --accent-2:#7adae4; --accent-soft:#11333a;
+    --ok:#6cc491; --ok-soft:#14291f;
+    --warn:#d7a25c; --warn-soft:#2b2115;
+    --crit:#ee8b80; --crit-soft:#2e1a18;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0c1116; --surface:#141b22; --surface-2:#1c252e; --sunk:#101820;
+  --ink:#e3e9ef; --ink-2:#a2aeba; --ink-3:#77838f;
+  --rule:#27323d; --rule-2:#35424f;
+  --accent:#54c6d2; --accent-2:#7adae4; --accent-soft:#11333a;
+  --ok:#6cc491; --ok-soft:#14291f;
+  --warn:#d7a25c; --warn-soft:#2b2115;
+  --crit:#ee8b80; --crit-soft:#2e1a18;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+  font-size:16px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1220px;margin:0 auto;padding:0 28px 96px}
+
+/* ---------- masthead ---------- */
+.mast{border-bottom:1px solid var(--rule);padding:56px 0 28px;margin-bottom:40px}
+.eyebrow{
+  font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 14px
+}
+h1{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;
+  font-weight:700;font-size:clamp(34px,5vw,52px);line-height:1.04;
+  letter-spacing:-.022em;margin:0 0 16px;text-wrap:balance;max-width:16ch
+}
+.standfirst{font-size:19px;line-height:1.55;color:var(--ink-2);max-width:62ch;margin:0}
+.facts{
+  display:flex;flex-wrap:wrap;gap:0;margin-top:32px;
+  border:1px solid var(--rule);border-radius:3px;background:var(--surface);overflow:hidden
+}
+.fact{flex:1 1 150px;padding:13px 18px;border-right:1px solid var(--rule)}
+.fact:last-child{border-right:0}
+.fact dt{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin:0 0 3px
+}
+.fact dd{margin:0;font-family:Archivo,sans-serif;font-weight:600;font-size:15px;color:var(--ink)}
+
+/* ---------- layout ---------- */
+.cols{display:block}
+@media (min-width:1060px){
+  .cols{display:grid;grid-template-columns:190px minmax(0,1fr);gap:56px;align-items:start}
+  .toc{position:sticky;top:28px}
+}
+.toc{margin-bottom:44px}
+.toc p{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 10px
+}
+.toc ol{list-style:none;margin:0;padding:0;counter-reset:t}
+.toc li{counter-increment:t;margin:0 0 2px}
+.toc a{
+  display:block;padding:4px 0 4px 26px;position:relative;
+  font-family:Archivo,sans-serif;font-size:13px;font-weight:500;line-height:1.35;
+  color:var(--ink-2);text-decoration:none;border-radius:2px
+}
+.toc a::before{
+  content:counter(t,decimal-leading-zero);position:absolute;left:0;
+  font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ink-3)
+}
+.toc a:hover{color:var(--accent)}
+.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- sections ---------- */
+section{margin:0 0 64px;scroll-margin-top:24px}
+h2{
+  font-family:Archivo,sans-serif;font-weight:600;font-size:26px;letter-spacing:-.012em;
+  margin:0 0 6px;padding-top:10px;border-top:2px solid var(--ink);color:var(--ink);text-wrap:balance
+}
+h3{
+  font-family:Archivo,sans-serif;font-weight:600;font-size:16px;letter-spacing:-.004em;
+  margin:34px 0 10px;color:var(--ink)
+}
+.kicker{
+  font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 20px
+}
+p{max-width:68ch;margin:0 0 15px}
+ul,ol{max-width:68ch;padding-left:20px}
+li{margin-bottom:7px}
+strong{font-weight:600}
+a{color:var(--accent)}
+code{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.855em;
+  background:var(--sunk);border:1px solid var(--rule);border-radius:3px;
+  padding:.08em .34em;color:var(--ink)
+}
+
+/* ---------- tables ---------- */
+.scroller{overflow-x:auto;margin:18px 0 8px;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-family:Archivo,sans-serif;font-size:13.5px;line-height:1.45}
+th{
+  text-align:left;font-weight:600;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);padding:10px 14px;border-bottom:1px solid var(--rule-2);white-space:nowrap;
+  background:var(--surface-2)
+}
+td{padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td:first-child{color:var(--ink);font-weight:500}
+td code,th code{font-size:12px;background:none;border:0;padding:0;color:inherit}
+.mono td:first-child{font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:400}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.pill{
+  display:inline-block;font-family:"JetBrains Mono",monospace;font-size:10px;
+  letter-spacing:.04em;padding:2px 7px;border-radius:2px;white-space:nowrap;border:1px solid
+}
+.p-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.p-warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.p-crit{background:var(--crit-soft);color:var(--crit);border-color:var(--crit)}
+.p-acc{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+
+/* ---------- figures ---------- */
+figure{margin:26px 0;padding:0}
+figure svg{display:block;width:100%;max-width:100%;height:auto;color:var(--ink-2)}
+.figframe{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:20px 18px;overflow-x:auto}
+figcaption{
+  font-family:Archivo,sans-serif;font-size:12.5px;line-height:1.5;color:var(--ink-3);
+  margin-top:11px;max-width:70ch
+}
+figcaption b{color:var(--ink-2);font-weight:600}
+
+/* svg vocabulary */
+.b{fill:var(--surface);stroke:var(--rule-2);stroke-width:1.25}
+.b-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.25}
+.b-s{fill:var(--surface-2);stroke:var(--rule-2);stroke-width:1.25}
+.b-ok{fill:var(--ok-soft);stroke:var(--ok);stroke-width:1.25}
+.b-w{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.25}
+.b-x{fill:var(--crit-soft);stroke:var(--crit);stroke-width:1.25}
+.b-net{fill:none;stroke:var(--rule-2);stroke-width:1.25;stroke-dasharray:5 4}
+.t{fill:var(--ink);font-family:Archivo,sans-serif;font-size:12.5px;font-weight:600}
+.ts{fill:var(--ink-2);font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:400}
+.tl{fill:var(--ink-3);font-family:"JetBrains Mono",monospace;font-size:9.5px}
+.tn{fill:var(--accent);font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:500}
+.l{stroke:var(--ink-3);stroke-width:1.25;fill:none}
+.l-a{stroke:var(--accent);stroke-width:1.5;fill:none}
+.l-ok{stroke:var(--ok);stroke-width:1.5;fill:none}
+.l-x{stroke:var(--crit);stroke-width:1.5;fill:none;stroke-dasharray:5 3}
+.l-w{stroke:var(--warn);stroke-width:1.5;fill:none;stroke-dasharray:5 3}
+.h{fill:var(--ink-3)}.h-a{fill:var(--accent)}.h-ok{fill:var(--ok)}.h-x{fill:var(--crit)}.h-w{fill:var(--warn)}
+
+/* ---------- callout ---------- */
+.note{
+  border-left:3px solid var(--accent);background:var(--surface);
+  padding:14px 18px;margin:22px 0;border-radius:0 3px 3px 0;box-shadow:var(--shadow)
+}
+.note p{margin:0;font-size:15px;color:var(--ink-2)}
+.note p + p{margin-top:9px}
+
+pre{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.6;
+  background:var(--sunk);border:1px solid var(--rule);border-radius:3px;
+  padding:14px 16px;overflow-x:auto;margin:18px 0;color:var(--ink-2)
+}
+pre b{color:var(--ink);font-weight:500}
+
+footer{
+  border-top:1px solid var(--rule);margin-top:56px;padding-top:20px;
+  font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ink-3)
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Architecture &amp; design reference</p>
+  <h1>AIBridge Gateway</h1>
+  <p class="standfirst">A Quarkus gateway that puts one OpenAI-shaped door in front of five LLM providers, and routes each call by <em>who is asking</em> and <em>what for</em> &mdash; never by a model name in the payload.</p>
+  <dl class="facts">
+    <div class="fact"><dt>Runtime</dt><dd>Quarkus 3.17 &middot; Java 17</dd></div>
+    <div class="fact"><dt>Providers</dt><dd>5 adapters</dd></div>
+    <div class="fact"><dt>Routing key</dt><dd>tenant &times; feature</dd></div>
+    <div class="fact"><dt>Pacing</dt><dd>RPS / RPM / TPM</dd></div>
+    <div class="fact"><dt>State</dt><dd>Postgres + cache</dd></div>
+  </dl>
+</header>
+
+<div class="cols">
+
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#topology">System topology</a></li>
+    <li><a href="#lifecycle">Request lifecycle</a></li>
+    <li><a href="#resolution">Config resolution</a></li>
+    <li><a href="#pacing">Rate pacing</a></li>
+    <li><a href="#adapters">Provider adapters</a></li>
+    <li><a href="#data">Data model</a></li>
+    <li><a href="#state">Cache &amp; state</a></li>
+    <li><a href="#errors">Error mapping</a></li>
+    <li><a href="#security">Security posture</a></li>
+    <li><a href="#deploy">Deployment</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ==================== 1 ==================== -->
+<section id="topology">
+  <h2>System topology</h2>
+  <p class="kicker">What talks to what</p>
+
+  <p>Two kinds of caller reach the same Quarkus process. A <strong>client application</strong> posts OpenAI-format chat completions and identifies itself with headers; the <strong>admin SPA</strong> bundled into the same JAR manages configuration and runs load tests. Both pass through one filter chain, land in one service layer, and fan out through the adapter layer to whichever provider the database says this tenant and feature should use.</p>
+
+  <figure>
+    <div class="figframe">
+      <svg viewBox="0 0 860 520" role="img" aria-label="Topology: client app and admin SPA enter through the HTTP filter chain, reach the service layer, which reads config and token buckets from the cache and falls through to PostgreSQL, then dispatches through the provider adapter layer to OpenAI, Cerebras, Claude, Bedrock and WatsonX.">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h"/></marker>
+          <marker id="a1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-a"/></marker>
+        </defs>
+
+        <!-- callers -->
+        <rect class="b" x="60" y="24" width="180" height="52" rx="3"/>
+        <text class="t" x="150" y="46" text-anchor="middle">Client application</text>
+        <text class="ts" x="150" y="63" text-anchor="middle">POST /v1/chat/completions</text>
+
+        <rect class="b" x="290" y="24" width="180" height="52" rx="3"/>
+        <text class="t" x="380" y="46" text-anchor="middle">Admin SPA</text>
+        <text class="ts" x="380" y="63" text-anchor="middle">Angular 21, same JAR</text>
+
+        <path class="l" d="M150,76 V106" marker-end="url(#a1)"/>
+        <text class="tl" x="158" y="95">X-Feature, X-Tenant-ID</text>
+        <path class="l" d="M380,76 V106" marker-end="url(#a1)"/>
+        <text class="tl" x="388" y="95">Bearer token</text>
+
+        <!-- edge -->
+        <rect class="b-s" x="60" y="106" width="410" height="52" rx="3"/>
+        <text class="t" x="265" y="128" text-anchor="middle">HTTP edge filters</text>
+        <text class="ts" x="265" y="145" text-anchor="middle">auth · security headers · correlation id · SPA routing</text>
+
+        <path class="l" d="M265,158 V194" marker-end="url(#a1)"/>
+
+        <!-- services -->
+        <rect class="b-a" x="60" y="194" width="410" height="52" rx="3"/>
+        <text class="t" x="265" y="216" text-anchor="middle">Service layer</text>
+        <text class="ts" x="265" y="233" text-anchor="middle">ChatCompletion · Admin · Validation · LoadTest</text>
+
+        <path class="l" d="M265,246 V282" marker-end="url(#a1)"/>
+
+        <!-- collaborators -->
+        <rect class="b" x="60" y="282" width="410" height="52" rx="3"/>
+        <text class="t" x="265" y="304" text-anchor="middle">ConfigResolver · ParameterMerge · RequestPacing</text>
+        <text class="ts" x="265" y="321" text-anchor="middle">routing, defaults, rate limits</text>
+
+        <!-- stores -->
+        <rect class="b" x="590" y="282" width="230" height="52" rx="3"/>
+        <text class="t" x="705" y="304" text-anchor="middle">Cache</text>
+        <text class="ts" x="705" y="321" text-anchor="middle">Redis or in-process map</text>
+
+        <rect class="b" x="590" y="366" width="230" height="52" rx="3"/>
+        <text class="t" x="705" y="388" text-anchor="middle">PostgreSQL</text>
+        <text class="ts" x="705" y="405" text-anchor="middle">configs, providers, features</text>
+
+        <path class="l-a" d="M470,300 H586" marker-end="url(#a1a)"/>
+        <text class="tl" x="528" y="294" text-anchor="middle">buckets · config</text>
+        <path class="l-a" d="M705,334 V362" marker-end="url(#a1a)"/>
+        <text class="tl" x="713" y="352">on cache miss</text>
+
+        <path class="l" d="M265,334 V370" marker-end="url(#a1)"/>
+
+        <!-- adapters -->
+        <rect class="b" x="60" y="370" width="410" height="52" rx="3"/>
+        <text class="t" x="265" y="392" text-anchor="middle">Provider adapter layer</text>
+        <text class="ts" x="265" y="409" text-anchor="middle">Map&lt;ProviderName, LlmProviderAdapter&gt;</text>
+
+        <path class="l" d="M265,422 V442"/>
+        <path class="l" d="M99,442 H431"/>
+        <path class="l" d="M99,442 V462" marker-end="url(#a1)"/>
+        <path class="l" d="M182,442 V462" marker-end="url(#a1)"/>
+        <path class="l" d="M265,442 V462" marker-end="url(#a1)"/>
+        <path class="l" d="M348,442 V462" marker-end="url(#a1)"/>
+        <path class="l" d="M431,442 V462" marker-end="url(#a1)"/>
+
+        <rect class="b-s" x="60" y="462" width="78" height="34" rx="3"/><text class="ts" x="99" y="483" text-anchor="middle">OpenAI</text>
+        <rect class="b-s" x="143" y="462" width="78" height="34" rx="3"/><text class="ts" x="182" y="483" text-anchor="middle">Cerebras</text>
+        <rect class="b-s" x="226" y="462" width="78" height="34" rx="3"/><text class="ts" x="265" y="483" text-anchor="middle">Claude</text>
+        <rect class="b-s" x="309" y="462" width="78" height="34" rx="3"/><text class="ts" x="348" y="483" text-anchor="middle">Bedrock</text>
+        <rect class="b-s" x="392" y="462" width="78" height="34" rx="3"/><text class="ts" x="431" y="483" text-anchor="middle">WatsonX</text>
+      </svg>
+    </div>
+    <figcaption><b>One process, two front doors.</b> The teal path is the only one that leaves the JVM for storage: everything the router needs per request comes from the cache, and PostgreSQL is touched only when that cache misses.</figcaption>
+  </figure>
+</section>
+
+<!-- ==================== 2 ==================== -->
+<section id="lifecycle">
+  <h2>Request lifecycle</h2>
+  <p class="kicker">Five steps, three ways to fail over</p>
+
+  <p>A chat completion is not routed by the <code>model</code> field &mdash; that field is ignored and the model comes from the database row. Routing is decided entirely by the <code>X-Tenant-ID</code> and <code>X-Feature</code> headers, which resolve to an <em>ordered chain</em> of configs. The gateway walks that chain, and three distinct conditions make it advance to the next link.</p>
+
+  <figure>
+    <div class="figframe">
+      <svg viewBox="0 0 860 350" role="img" aria-label="Request lifecycle: resolve chain, merge params, acquire pacing slot, call provider, normalize response. A queue timeout at step three or a 429 or 5xx at step four advances to the next config in the chain and retries from merge; exhausting the chain returns 502.">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h"/></marker>
+          <marker id="a2w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-w"/></marker>
+          <marker id="a2x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-x"/></marker>
+          <marker id="a2ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-ok"/></marker>
+        </defs>
+
+        <rect class="b" x="20" y="56" width="140" height="54" rx="3"/>
+        <text class="tn" x="32" y="76">01</text><text class="t" x="32" y="93">Resolve chain</text>
+        <text class="tl" x="32" y="105">tenant × feature</text>
+
+        <rect class="b" x="185" y="56" width="140" height="54" rx="3"/>
+        <text class="tn" x="197" y="76">02</text><text class="t" x="197" y="93">Merge params</text>
+        <text class="tl" x="197" y="105">payload &gt; DB default</text>
+
+        <rect class="b" x="350" y="56" width="140" height="54" rx="3"/>
+        <text class="tn" x="362" y="76">03</text><text class="t" x="362" y="93">Acquire slot</text>
+        <text class="tl" x="362" y="105">token bucket</text>
+
+        <rect class="b" x="515" y="56" width="140" height="54" rx="3"/>
+        <text class="tn" x="527" y="76">04</text><text class="t" x="527" y="93">Call provider</text>
+        <text class="tl" x="527" y="105">adapter translates</text>
+
+        <rect class="b" x="680" y="56" width="140" height="54" rx="3"/>
+        <text class="tn" x="692" y="76">05</text><text class="t" x="692" y="93">Normalize</text>
+        <text class="tl" x="692" y="105">+ reconcile tokens</text>
+
+        <path class="l" d="M160,83 H181" marker-end="url(#a2)"/>
+        <path class="l" d="M325,83 H346" marker-end="url(#a2)"/>
+        <path class="l" d="M490,83 H511" marker-end="url(#a2)"/>
+        <path class="l" d="M655,83 H676" marker-end="url(#a2)"/>
+
+        <!-- failure branches -->
+        <path class="l-w" d="M420,110 V146 H460" marker-end="url(#a2w)"/>
+        <text class="tl" x="428" y="130">waited &gt; 5000 ms</text>
+        <path class="l-x" d="M585,110 V146 H545" marker-end="url(#a2x)"/>
+        <text class="tl" x="596" y="130">429 · 5xx · timeout</text>
+
+        <rect class="b-w" x="360" y="146" width="285" height="46" rx="3"/>
+        <text class="t" x="502" y="166" text-anchor="middle">Advance to next config in chain</text>
+        <text class="ts" x="502" y="182" text-anchor="middle">is_fallback, then global</text>
+
+        <!-- retry loop back to step 2 -->
+        <path class="l-w" d="M360,169 H175 V128 H255 V114" marker-end="url(#a2w)"/>
+        <text class="tl" x="182" y="145">retry with next config</text>
+
+        <!-- exhausted -->
+        <path class="l-x" d="M502,192 V236" marker-end="url(#a2x)"/>
+        <text class="tl" x="510" y="218">chain exhausted</text>
+        <rect class="b-x" x="360" y="236" width="285" height="46" rx="3"/>
+        <text class="t" x="502" y="256" text-anchor="middle">502 Bad Gateway</text>
+        <text class="ts" x="502" y="272" text-anchor="middle">ProviderUnavailableException</text>
+
+        <!-- success -->
+        <path class="l-ok" d="M750,110 V236" marker-end="url(#a2ok)"/>
+        <rect class="b-ok" x="680" y="236" width="160" height="46" rx="3"/>
+        <text class="t" x="760" y="256" text-anchor="middle">200 OK</text>
+        <text class="ts" x="760" y="272" text-anchor="middle">OpenAI format</text>
+
+        <!-- empty-response note -->
+        <text class="tl" x="680" y="306">an empty but successful provider reply still returns 200,</text>
+        <text class="tl" x="680" y="318">with an empty choices payload — it is not a failover trigger</text>
+      </svg>
+    </div>
+    <figcaption><b>Failover re-enters at step 02, not step 01.</b> The chain is resolved once; each retry re-merges parameters against the <em>next</em> config's defaults, because a fallback provider carries its own temperature, token ceiling and rate limits.</figcaption>
+  </figure>
+
+  <h3>What advances the chain</h3>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Trigger</th><th>Where</th><th>Signal</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill p-warn">queue timeout</span></td><td>Step 03</td><td>No pacing slot within <code>queue_timeout_ms</code> (default 5000)</td></tr>
+        <tr><td><span class="pill p-crit">provider 429</span></td><td>Step 04</td><td>Upstream rate limit reached despite local pacing</td></tr>
+        <tr><td><span class="pill p-crit">provider 5xx</span></td><td>Step 04</td><td>Provider down, or the HTTP call timed out</td></tr>
+        <tr><td><span class="pill p-ok">empty response</span></td><td>Step 05</td><td><em>Not</em> a trigger &mdash; returned to the caller as 200 with empty content</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== 3 ==================== -->
+<section id="resolution">
+  <h2>Config resolution</h2>
+  <p class="kicker">How the chain is built</p>
+
+  <p>One lookup produces the whole failover chain, in priority order. A tenant's own configuration is preferred over the global default, and within each scope the primary is preferred over the fallback. The result is cached for five minutes under <code>llm_config:{tenant}:{feature}</code> and invalidated whenever an admin writes to any config that touches that feature.</p>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>Order</th><th>tenant_id</th><th>is_fallback</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td><code>= T</code></td><td><code>false</code></td><td>Tenant primary &mdash; lowest <code>priority</code> value wins</td></tr>
+        <tr><td class="num">2</td><td><code>= T</code></td><td><code>true</code></td><td>Tenant's own fallback provider</td></tr>
+        <tr><td class="num">3</td><td><code>IS NULL</code></td><td><code>false</code></td><td>Global primary, shared by every tenant</td></tr>
+        <tr><td class="num">4</td><td><code>IS NULL</code></td><td><code>true</code></td><td>Global fallback &mdash; last resort</td></tr>
+        <tr><td class="num">&mdash;</td><td colspan="2"><code>no active rows</code></td><td><span class="pill p-crit">404</span> <code>ConfigNotFoundException</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Only rows with <code>is_active = true</code> are considered, which makes admin deletion a soft deactivation rather than a destructive write &mdash; a config can be pulled out of rotation and put back without losing its encrypted credentials.</p>
+
+  <div class="note">
+    <p><strong>Why the model name is server-side.</strong> Callers send a feature, not a model. That lets an operator move <code>summarization</code> from GPT-4o to Claude, or add a Cerebras fallback behind it, with a single admin write and no client deployment. It also means a compromised client cannot pick an expensive model.</p>
+  </div>
+</section>
+
+<!-- ==================== 4 ==================== -->
+<section id="pacing">
+  <h2>Rate pacing</h2>
+  <p class="kicker">Queue rather than reject</p>
+
+  <p>When a caller exceeds a provider's rate limit, the gateway does not return 429. It holds the request and dispatches it as soon as a token is available &mdash; and only gives up, in favour of the next provider in the chain, once the wait exceeds that config's <code>queue_timeout_ms</code>. Each config gets up to three independent token buckets, created only for the limits that are actually set.</p>
+
+  <figure>
+    <div class="figframe">
+      <svg viewBox="0 0 780 290" role="img" aria-label="Token bucket pacing: a request tries to acquire a token atomically. Granted requests are forwarded to the adapter; an empty bucket queues the request, which polls every 50 milliseconds and retries; waiting longer than the queue timeout advances to the next config.">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h"/></marker>
+          <marker id="a3ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-ok"/></marker>
+          <marker id="a3w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-w"/></marker>
+          <marker id="a3x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-x"/></marker>
+        </defs>
+
+        <!-- refill -->
+        <path class="l-a" d="M325,22 V74" marker-end="url(#a3)"/>
+        <text class="tl" x="335" y="42">refill at rps_limit / sec,</text>
+        <text class="tl" x="335" y="54">rpm_limit and tpm_limit / min</text>
+
+        <!-- request -->
+        <rect class="b" x="30" y="108" width="150" height="50" rx="3"/>
+        <text class="t" x="105" y="130" text-anchor="middle">Incoming request</text>
+        <text class="ts" x="105" y="146" text-anchor="middle">for one config</text>
+        <path class="l" d="M180,133 H246" marker-end="url(#a3)"/>
+
+        <!-- bucket -->
+        <rect class="b" x="250" y="74" width="150" height="120" rx="3"/>
+        <rect x="258" y="140" width="134" height="46" rx="2" fill="var(--accent-soft)" stroke="none"/>
+        <text class="t" x="325" y="100" text-anchor="middle">Token bucket</text>
+        <text class="ts" x="325" y="118" text-anchor="middle">atomic try-acquire</text>
+        <text class="tl" x="325" y="168" text-anchor="middle">tokenbucket:{configId}:rps</text>
+        <text class="tl" x="325" y="180" text-anchor="middle">…:rpm  ·  …:tpm</text>
+
+        <!-- outcomes -->
+        <path class="l-ok" d="M400,88 H476" marker-end="url(#a3ok)"/>
+        <rect class="b-ok" x="480" y="66" width="270" height="44" rx="3"/>
+        <text class="t" x="494" y="85">Token available</text>
+        <text class="ts" x="494" y="101">forward to the provider adapter</text>
+
+        <path class="l-w" d="M400,134 H476" marker-end="url(#a3w)"/>
+        <rect class="b-w" x="480" y="122" width="270" height="44" rx="3"/>
+        <text class="t" x="494" y="141">Bucket empty</text>
+        <text class="ts" x="494" y="157">queue, re-poll every 50 ms</text>
+
+        <path class="l-x" d="M400,180 H476" marker-end="url(#a3x)"/>
+        <rect class="b-x" x="480" y="178" width="270" height="44" rx="3"/>
+        <text class="t" x="494" y="197">Waited past queue_timeout_ms</text>
+        <text class="ts" x="494" y="213">advance to the next config</text>
+
+        <!-- retry loop -->
+        <path class="l-w" d="M615,166 V244 H325 V198" marker-end="url(#a3w)"/>
+        <text class="tl" x="340" y="238">retry until granted or timed out</text>
+      </svg>
+    </div>
+    <figcaption><b>Pacing is per config, not per tenant.</b> The bucket key is the config id, so two tenants sharing one global config share its rate budget &mdash; which is what makes a single upstream API key safe to share.</figcaption>
+  </figure>
+
+  <h3>Token accounting</h3>
+  <p>RPS and RPM are debited before the call. TPM cannot be: the real token cost is only known once the provider answers, so the gateway debits an estimate up front and calls <code>reconcileTokens</code> with the actual usage from the response, correcting the bucket after the fact.</p>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>Cache key</th><th>Holds</th><th>TTL</th></tr></thead>
+      <tbody>
+        <tr><td>llm_config:{tenant}:{feature}</td><td>Resolved failover chain</td><td class="num">300 s</td></tr>
+        <tr><td>tokenbucket:{configId}:rps</td><td>tokens, last_refill</td><td class="num">120 s</td></tr>
+        <tr><td>tokenbucket:{configId}:rpm</td><td>tokens, last_refill</td><td class="num">120 s</td></tr>
+        <tr><td>tokenbucket:{configId}:tpm</td><td>tokens, last_refill</td><td class="num">120 s</td></tr>
+        <tr><td>auth_token:{providerId}:{configId}</td><td>Exchanged provider token</td><td class="num">expiry − buffer</td></tr>
+        <tr><td>aibridge:api_token:{token}</td><td>Admin session validity</td><td class="num">60 min</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== 5 ==================== -->
+<section id="adapters">
+  <h2>Provider adapters</h2>
+  <p class="kicker">One interface, five dialects</p>
+
+  <p>Every adapter implements the same two-method interface and is selected from a CDI-populated map keyed by provider name. The gateway's internal representation is always the OpenAI shape; each adapter owns the translation in both directions, including whatever authentication ritual the provider demands.</p>
+
+  <pre><b>public interface</b> LlmProviderAdapter {
+    ProviderName          getProviderName();
+    ChatCompletionResponse complete(ChatCompletionRequest request, LlmConfig config);
+}</pre>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Provider</th><th>Auth</th><th>Translation work</th></tr></thead>
+      <tbody>
+        <tr><td>OpenAI</td><td><span class="pill p-acc">API key</span></td><td>Near pass-through &mdash; swap base URL and key</td></tr>
+        <tr><td>Cerebras</td><td><span class="pill p-acc">API key</span></td><td>OpenAI-compatible; same path as above</td></tr>
+        <tr><td>Claude</td><td><span class="pill p-acc">API key</span></td><td>Lifts the system prompt out of <code>messages</code> into its own field</td></tr>
+        <tr><td>WatsonX</td><td><span class="pill p-warn">IAM exchange</span></td><td>Trades an API key for an IAM token (cached), adds <code>project_id</code></td></tr>
+        <tr><td>Bedrock</td><td><span class="pill p-warn">AWS SigV4</span></td><td>Signs each request; maps to the Converse API shape</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Parameter merge</h3>
+  <p>Before any adapter sees the request, optional generation parameters are resolved three ways in order: the value in the caller's payload wins; otherwise the config's stored default is used; otherwise the parameter is omitted entirely so the provider applies its own default. Omission is deliberate &mdash; sending <code>temperature: 0</code> because nothing was configured would silently change model behaviour.</p>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>Merged</th><th>Always server-side</th></tr></thead>
+      <tbody>
+        <tr><td>temperature, max_tokens, top_p, n</td><td rowspan="2"><code>model</code> — taken from <code>llm_config.model_name</code>, never from the payload</td></tr>
+        <tr><td>stop, presence_penalty, frequency_penalty</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== 6 ==================== -->
+<section id="data">
+  <h2>Data model</h2>
+  <p class="kicker">Three tables, one migration</p>
+
+  <p>Flyway owns the schema; <code>V1__init_schema.sql</code> runs at startup. The shape is small on purpose &mdash; provider types, per-tenant configuration, and the feature labels that point at them.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Table</th><th>Carries</th><th>Key constraint</th></tr></thead>
+      <tbody>
+        <tr><td><code>llm_provider</code></td><td>Provider type and its auth mechanism, plus an optional auth endpoint for token exchange</td><td>&mdash;</td></tr>
+        <tr><td><code>llm_config</code></td><td>Model name, endpoint, encrypted credentials, rate limits, generation defaults, priority, fallback flag, provider-specific <code>extra_params</code></td><td><code>UNIQUE (tenant_id, model_name, is_fallback)</code></td></tr>
+        <tr><td><code>features</code></td><td>Feature labels attached to a config, cascade-deleted with it</td><td><code>UNIQUE (llm_config_id, feature)</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Credentials are never stored in the clear: the whole credential blob is AES-256 encrypted with <code>aibridge.encryption.key</code> before it reaches the column, and admin reads return a masked value. Rotating that key requires re-encrypting every row &mdash; it is not a value to change casually.</p>
+
+  <h3>Validation on write</h3>
+  <p>Creating or updating a config does not simply persist it. The admin API first asks the matching adapter to make a real completion call with a trivial prompt; only a successful provider response allows the row to be written. A bad key, an unreachable endpoint or a nonexistent model comes back as <span class="pill p-crit">422</span> with the provider's own reason, rather than as a runtime failure at the first real request.</p>
+</section>
+
+<!-- ==================== 7 ==================== -->
+<section id="state">
+  <h2>Cache &amp; state</h2>
+  <p class="kicker">The one decision that constrains scaling</p>
+
+  <p>Everything that isn't in PostgreSQL lives behind a <code>CacheProvider</code> interface with two implementations, chosen at startup by the <code>cache.mode</code> property. This is the single knob that decides whether the gateway can run as more than one instance.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th><code>cache.mode</code></th><th>Backed by</th><th>Rate limits are</th><th>Suitable for</th></tr></thead>
+      <tbody>
+        <tr><td><code>in-memory</code> <span class="pill p-acc">default</span></td><td>In-process map</td><td>Per JVM &mdash; two replicas allow double the traffic</td><td>Local development, single-instance deploys</td></tr>
+        <tr><td><code>redis</code></td><td>Redis 7</td><td>Shared &mdash; the limit is the real limit</td><td>Any horizontally scaled deployment</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <p><strong>Admin sessions live in the same cache.</strong> Bearer tokens issued by <code>POST /api/auth/token</code> are stored under <code>aibridge:api_token:{token}</code>. In <code>in-memory</code> mode, a restart logs every admin out, and behind a load balancer a token minted by one replica is unknown to the others.</p>
+  </div>
+</section>
+
+<!-- ==================== 8 ==================== -->
+<section id="errors">
+  <h2>Error mapping</h2>
+  <p class="kicker">Exception to status code</p>
+
+  <p>A single <code>GlobalExceptionMapper</code> turns domain exceptions into HTTP responses, so a caller can distinguish a misconfiguration from an upstream outage without reading log output.</p>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>Exception</th><th>Status</th><th>Means</th></tr></thead>
+      <tbody>
+        <tr><td>ConfigNotFoundException</td><td><span class="pill p-warn">404</span></td><td>No active config for this tenant and feature</td></tr>
+        <tr><td>LlmValidationException</td><td><span class="pill p-warn">422</span></td><td>Admin-supplied config failed its live test call</td></tr>
+        <tr><td>QueueTimeoutException</td><td><span class="pill p-warn">—</span></td><td>Internal; consumed by the failover loop</td></tr>
+        <tr><td>ProviderRateLimitException</td><td><span class="pill p-warn">—</span></td><td>Internal; consumed by the failover loop</td></tr>
+        <tr><td>ProviderUnavailableException</td><td><span class="pill p-crit">502</span></td><td>Every config in the chain was exhausted</td></tr>
+        <tr><td>EmptyLlmResponseException</td><td><span class="pill p-ok">200</span></td><td>Provider answered with no content; surfaced as-is</td></tr>
+        <tr><td>EncryptionException</td><td><span class="pill p-crit">500</span></td><td>Key is missing or not 32 characters</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== 9 ==================== -->
+<section id="security">
+  <h2>Security posture</h2>
+  <p class="kicker">What the edge enforces</p>
+
+  <p>The gateway holds every tenant's provider credentials and makes outbound calls on their behalf, which makes two risks specific to it: credential exposure and server-side request forgery.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Control</th><th>Mechanism</th></tr></thead>
+      <tbody>
+        <tr><td>Credential at rest</td><td>AES-256 over the credential blob; admin responses return a mask, never the plaintext</td></tr>
+        <tr><td>SSRF</td><td><code>EndpointUrlValidator</code> checks every configured endpoint against <code>aibridge.allowed-provider-hosts</code> before a call is made</td></tr>
+        <tr><td>Plain HTTP endpoints</td><td>Permitted in dev, refused under the <code>prod</code> profile</td></tr>
+        <tr><td>Admin authentication</td><td>Static API key exchanged for a short-lived opaque bearer token; the key itself never travels on subsequent calls</td></tr>
+        <tr><td>Request body size</td><td>Capped at 1 MB by the HTTP layer</td></tr>
+        <tr><td>Queue depth</td><td><code>aibridge.queue.max-depth</code> bounds the pacing queue so a slow provider cannot exhaust memory</td></tr>
+        <tr><td>Response headers</td><td><code>SecurityHeadersFilter</code> applies the standard hardening set to every response</td></tr>
+        <tr><td>Traceability</td><td><code>RequestCorrelationFilter</code> stamps <code>X-Request-ID</code> through the whole call, including adapter logs</td></tr>
+        <tr><td>SQL injection</td><td>Panache repositories, parameterised throughout &mdash; no string-built queries</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== 10 ==================== -->
+<section id="deploy">
+  <h2>Deployment</h2>
+  <p class="kicker">One image, three services</p>
+
+  <p>The image is built in three stages: Node compiles the Angular bundle straight into the Maven resource tree, Maven packages the Quarkus fast-jar around it, and a JRE base runs it as a non-root user. Nothing but Docker is needed on the build host.</p>
+
+  <figure>
+    <div class="figframe">
+      <svg viewBox="0 0 860 300" role="img" aria-label="Deployment: the .env file feeds the aibridge container, which is published on localhost 8080 and reaches PostgreSQL and Redis by compose service name inside the compose network.">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h"/></marker>
+          <marker id="a4a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="h-a"/></marker>
+        </defs>
+
+        <rect class="b-net" x="170" y="72" width="670" height="200" rx="4"/>
+        <text class="tl" x="184" y="90">compose network</text>
+
+        <!-- env -->
+        <rect class="b-a" x="210" y="18" width="240" height="42" rx="3"/>
+        <text class="t" x="330" y="37" text-anchor="middle">.env</text>
+        <text class="ts" x="330" y="52" text-anchor="middle">env_file + compose overrides</text>
+        <path class="l-a" d="M330,60 V116" marker-end="url(#a4a)"/>
+
+        <!-- caller -->
+        <rect class="b" x="20" y="140" width="130" height="44" rx="3"/>
+        <text class="ts" x="85" y="158" text-anchor="middle">browser /</text>
+        <text class="ts" x="85" y="172" text-anchor="middle">client</text>
+        <path class="l" d="M150,162 H206" marker-end="url(#a4)"/>
+        <text class="tl" x="152" y="154">:8080</text>
+
+        <!-- app -->
+        <rect class="b-a" x="210" y="116" width="240" height="96" rx="3"/>
+        <text class="t" x="330" y="140" text-anchor="middle">aibridge</text>
+        <text class="ts" x="330" y="158" text-anchor="middle">Quarkus fast-jar, JRE 17</text>
+        <text class="ts" x="330" y="174" text-anchor="middle">non-root uid 1001</text>
+        <text class="tl" x="330" y="192" text-anchor="middle">healthcheck /q/health/ready</text>
+
+        <!-- postgres -->
+        <rect class="b" x="560" y="100" width="240" height="56" rx="3"/>
+        <text class="t" x="680" y="123" text-anchor="middle">postgres:16-alpine</text>
+        <text class="ts" x="680" y="140" text-anchor="middle">volume pgdata</text>
+
+        <!-- redis -->
+        <rect class="b" x="560" y="184" width="240" height="56" rx="3"/>
+        <text class="t" x="680" y="207" text-anchor="middle">redis:7-alpine</text>
+        <text class="ts" x="680" y="224" text-anchor="middle">volume redisdata, AOF on</text>
+
+        <path class="l" d="M450,150 H505 V128 H556" marker-end="url(#a4)"/>
+        <text class="tl" x="452" y="144">jdbc:postgresql://postgres:5432</text>
+        <path class="l" d="M450,182 H505 V212 H556" marker-end="url(#a4)"/>
+        <text class="tl" x="452" y="204">redis://redis:6379</text>
+      </svg>
+    </div>
+    <figcaption><b>Compose overrides beat <code>.env</code>.</b> The same file works for a local backend and for the container because the service-name URLs are set in the compose <code>environment</code> block, which outranks <code>env_file</code>.</figcaption>
+  </figure>
+
+  <h3>Configuration precedence</h3>
+  <p>Quarkus reads configuration from several sources; the first one that defines a property wins.</p>
+
+  <div class="scroller">
+    <table class="mono">
+      <thead><tr><th>Rank</th><th>Source</th><th>Typical use</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>System properties (<code>-D…</code>)</td><td>One-off overrides, <code>-Dui.required=true</code> at build time</td></tr>
+        <tr><td class="num">2</td><td>Environment variables</td><td>Container and CI configuration</td></tr>
+        <tr><td class="num">3</td><td><code>.env</code> in the working directory</td><td>Local development secrets</td></tr>
+        <tr><td class="num">4</td><td><code>application.properties</code></td><td>Defaults, including <code>%docker</code> and <code>%prod</code> profiles</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Property names map to environment variables by uppercasing and replacing every non-alphanumeric character with an underscore: <code>quarkus.datasource.jdbc.url</code> becomes <code>QUARKUS_DATASOURCE_JDBC_URL</code>, <code>aibridge.encryption.key</code> becomes <code>AIBRIDGE_ENCRYPTION_KEY</code>.</p>
+
+  <div class="note">
+    <p><strong>Build on JDK 17 or 21.</strong> Quarkus 3.17.5 bundles a Byte Buddy that supports class files up to Java 23. A newer JDK compiles the sources fine and then fails in Quarkus augmentation, which makes the error look like a code problem when it is a toolchain one.</p>
+  </div>
+</section>
+
+<footer>
+  AIBridge · architecture reference · derived from Architecture.md and the source tree
+</footer>
+
+</main>
+</div>
+</div>
+</body>
+</html>

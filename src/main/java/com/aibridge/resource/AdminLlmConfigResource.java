@@ -12,6 +12,7 @@ import com.aibridge.repository.LlmProviderRepository;
 import com.aibridge.filter.EndpointUrlValidator;
 import com.aibridge.service.ConfigResolverService;
 import com.aibridge.service.EncryptionService;
+import com.aibridge.service.GatewayModelNameService;
 import com.aibridge.service.LlmValidationService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -60,6 +61,9 @@ public class AdminLlmConfigResource {
     @Inject
     EndpointUrlValidator endpointUrlValidator;
 
+    @Inject
+    GatewayModelNameService gatewayModelNameService;
+
     @GET
     public List<LlmConfigResponse> listConfigs(
             @QueryParam("tenant_id") String tenantId,
@@ -104,6 +108,7 @@ public class AdminLlmConfigResource {
 
         LlmConfig entity = new LlmConfig();
         applyRequestToEntity(entity, request, provider, encryptedCredentials);
+        gatewayModelNameService.assign(entity, request.getModelName());
         entity.setActive(true);
         attachFeatures(entity, request.getFeatures());
 
@@ -146,6 +151,7 @@ public class AdminLlmConfigResource {
         configResolverService.invalidateCacheForConfig(entity);
 
         applyRequestToEntity(entity, request, provider, encryptedCredentials);
+        gatewayModelNameService.reassignIfModelChanged(entity, request.getModelName());
         entity.getFeatures().clear();
         attachFeatures(entity, request.getFeatures());
 
@@ -232,6 +238,11 @@ public class AdminLlmConfigResource {
             LlmConfigRequest request, LlmProvider provider, String encryptedCredentials) {
         LlmConfig c = new LlmConfig();
         applyRequestToEntity(c, request, provider, encryptedCredentials);
+        // Probes are validated, never persisted, so they get a provisional name rather than
+        // burning a sequence number that a failed validation would leave behind.
+        c.setModelSlug(GatewayModelNameService.slugify(request.getModelName()));
+        c.setModelSequence(0);
+        c.setGatewayModelName(GatewayModelNameService.compose(c.getModelSlug(), 0));
         return c;
     }
 

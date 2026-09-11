@@ -1,6 +1,9 @@
 package com.aibridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -12,6 +15,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.aibridge.adapter.LlmProviderAdapter;
+import com.aibridge.dto.lineage.AttemptOutcome;
+import com.aibridge.dto.lineage.CallAttempt;
+import com.aibridge.dto.lineage.CompletionLineage;
 import com.aibridge.dto.openai.ChatCompletionRequest;
 import com.aibridge.dto.openai.ChatCompletionResponse;
 import com.aibridge.dto.openai.ChatMessage;
@@ -162,7 +168,8 @@ class ChatCompletionServiceTest {
         ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
 
         assertEquals("", out.getChoices().get(0).getMessage().getContent());
-        assertEquals(cfg.getModelName(), out.getModel());
+        // The empty shape carries the gateway identity, like every other response.
+        assertEquals(cfg.getGatewayModelName(), out.getModel());
     }
 
     @Test
@@ -247,7 +254,8 @@ class ChatCompletionServiceTest {
         ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
 
         assertEquals("", out.getChoices().get(0).getMessage().getContent());
-        assertEquals(cfg.getModelName(), out.getModel());
+        // The empty shape carries the gateway identity, like every other response.
+        assertEquals(cfg.getGatewayModelName(), out.getModel());
     }
 
     @Test
@@ -329,6 +337,287 @@ class ChatCompletionServiceTest {
         assertEquals("", out.getChoices().get(0).getMessage().getContent());
     }
 
+    // =========================================================================
+    // Gateway model pinning — DAO resolution is mocked, LLM calls are mocked.
+    // =========================================================================
+
+    @Test
+    void modelPinned_resolvesByGatewayNameAndSkipsFeatureRouting() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveByGatewayModelName("tenant", "ai-bridge-1-m1"))
+                .thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), eq(cfg))).thenReturn(merged);
+        when(openAiAdapter.complete(merged, cfg)).thenReturn(responseWithContent("pinned"));
+
+        ChatCompletionRequest req = userRequest();
+        req.setModel("ai-bridge-1-m1");
+
+        ChatCompletionResponse out = chatCompletionService.complete("tenant", "feat", req);
+
+        assertEquals("pinned", out.getChoices().get(0).getMessage().getContent());
+        verify(configResolverService).resolveByGatewayModelName("tenant", "ai-bridge-1-m1");
+        verify(configResolverService, never()).resolveChain(any(), any());
+    }
+
+    @Test
+    void providerModelInPayload_stillUsesFeatureRouting() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain("tenant", "feat")).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), eq(cfg))).thenReturn(merged);
+        when(openAiAdapter.complete(merged, cfg)).thenReturn(responseWithContent("ok"));
+
+        ChatCompletionRequest req = userRequest();
+        req.setModel("gpt-4o");
+
+        chatCompletionService.complete("tenant", "feat", req);
+
+        verify(configResolverService).resolveChain("tenant", "feat");
+        verify(configResolverService, never()).resolveByGatewayModelName(any(), any());
+    }
+
+    @Test
+    void responseEchoesGatewayModelNameNotProviderModel() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        ChatCompletionResponse provider = responseWithContent("ok");
+        provider.setModel("gpt-4o");
+        when(openAiAdapter.complete(merged, cfg)).thenReturn(provider);
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        assertEquals("ai-bridge-1-m1", out.getModel());
+    }
+
+    @Test
+    void emptyResponseAlsoCarriesGatewayModelName() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, cfg)).thenReturn(responseWithContent("   "));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        assertEquals("ai-bridge-1-m1", out.getModel());
+    }
+
+    // =========================================================================
+    // Lineage — one record per attempt, with token detail.
+    // =========================================================================
+
+    @Test
+    void lineage_singleSuccessfulAttempt_recordsIdentityOutcomeAndTokens() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveChain("tenant", "feat")).thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), eq(cfg))).thenReturn(merged);
+        when(openAiAdapter.complete(merged, cfg))
+                .thenReturn(responseWithContentAndUsage("ok", usage(10, 7, 17)));
+
+        ChatCompletionResponse out = chatCompletionService.complete("tenant", "feat", userRequest());
+
+        CompletionLineage lineage = out.getLineage();
+        assertNotNull(lineage);
+        assertEquals(CompletionLineage.ROUTING_FEATURE, lineage.getRouting());
+        assertEquals("tenant", lineage.getTenantId());
+        assertEquals("feat", lineage.getFeature());
+        assertEquals(1, lineage.getChainLength());
+        assertEquals(1, lineage.getAttempts().size());
+
+        CallAttempt attempt = lineage.getAttempts().get(0);
+        assertEquals(1, attempt.getSequence());
+        assertEquals(AttemptOutcome.SUCCESS, attempt.getOutcome());
+        assertEquals("ai-bridge-1-m1", attempt.getGatewayModelName());
+        assertEquals("m1", attempt.getModelName());
+        assertEquals("OPENAI", attempt.getProvider());
+        assertEquals(cfg.getId().toString(), attempt.getConfigId());
+        assertEquals(10, attempt.getPromptTokens());
+        assertEquals(7, attempt.getCompletionTokens());
+        assertEquals(17, attempt.getTotalTokens());
+        assertEquals(17, lineage.getBilledTotalTokens());
+    }
+
+    @Test
+    void lineage_modelPinnedRoutingIsLabelled() {
+        LlmConfig cfg = openAiConfig();
+        when(configResolverService.resolveByGatewayModelName(any(), eq("ai-bridge-1-m1")))
+                .thenReturn(List.of(cfg));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, cfg)).thenReturn(responseWithContent("ok"));
+
+        ChatCompletionRequest req = userRequest();
+        req.setModel("ai-bridge-1-m1");
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", null, req);
+
+        assertEquals(CompletionLineage.ROUTING_MODEL, out.getLineage().getRouting());
+    }
+
+    @Test
+    void lineage_queueTimeoutThenSuccess_recordsBothAttemptsInOrder() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        doThrow(new QueueTimeoutException(first.getId().toString()))
+                .when(requestPacingService)
+                .acquireSlot(first);
+        when(openAiAdapter.complete(merged, second))
+                .thenReturn(responseWithContentAndUsage("second", usage(3, 4, 7)));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        CompletionLineage lineage = out.getLineage();
+        assertEquals(2, lineage.getAttempts().size());
+        assertEquals(AttemptOutcome.QUEUE_TIMEOUT, lineage.getAttempts().get(0).getOutcome());
+        assertEquals(1, lineage.getAttempts().get(0).getSequence());
+        assertNull(lineage.getAttempts().get(0).getTotalTokens());
+        assertEquals(AttemptOutcome.SUCCESS, lineage.getAttempts().get(1).getOutcome());
+        assertEquals(2, lineage.getAttempts().get(1).getSequence());
+        assertEquals(7, lineage.getBilledTotalTokens());
+    }
+
+    @Test
+    void lineage_rateLimitedAttemptIsRecordedWithProviderDetail() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, first))
+                .thenThrow(new ProviderRateLimitException("openai said 429"));
+        when(openAiAdapter.complete(merged, second)).thenReturn(responseWithContent("ok"));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        CallAttempt failed = out.getLineage().getAttempts().get(0);
+        assertEquals(AttemptOutcome.RATE_LIMITED, failed.getOutcome());
+        assertTrue(failed.getDetail().contains("429"));
+    }
+
+    @Test
+    void lineage_unavailableAttemptIsRecorded() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, first))
+                .thenThrow(new ProviderUnavailableException("connect timeout"));
+        when(openAiAdapter.complete(merged, second)).thenReturn(responseWithContent("ok"));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        assertEquals(AttemptOutcome.UNAVAILABLE, out.getLineage().getAttempts().get(0).getOutcome());
+    }
+
+    @Test
+    void lineage_missingAdapterIsRecordedAsNoAdapter() {
+        LlmConfig unsupported = cerebrasConfig();
+        LlmConfig supported = openAiConfig();
+        when(configResolverService.resolveChain(any(), any()))
+                .thenReturn(List.of(unsupported, supported));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, supported)).thenReturn(responseWithContent("ok"));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        assertEquals(AttemptOutcome.NO_ADAPTER, out.getLineage().getAttempts().get(0).getOutcome());
+        assertEquals(AttemptOutcome.SUCCESS, out.getLineage().getAttempts().get(1).getOutcome());
+    }
+
+    @Test
+    void lineage_emptyResponseIsTerminalAndRecorded() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, first)).thenReturn(responseWithContent(""));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        assertEquals(1, out.getLineage().getAttempts().size());
+        assertEquals(AttemptOutcome.EMPTY_RESPONSE, out.getLineage().getAttempts().get(0).getOutcome());
+        // The second config is never touched — an empty answer is not a failover trigger.
+        verify(openAiAdapter, never()).complete(merged, second);
+    }
+
+    @Test
+    void lineage_tokensAreSummedAcrossEveryAttemptNotJustTheSuccessfulOne() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        // A provider can bill for a call that still ends in a rate-limit refusal downstream;
+        // the gateway must not silently drop those tokens.
+        when(openAiAdapter.complete(merged, first))
+                .thenThrow(new ProviderUnavailableException("5xx"));
+        when(openAiAdapter.complete(merged, second))
+                .thenReturn(responseWithContentAndUsage("ok", usage(100, 50, 150)));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        assertEquals(150, out.getLineage().getBilledTotalTokens());
+        assertEquals(2, out.getLineage().getAttempts().size());
+    }
+
+    @Test
+    void lineage_logStringNamesEveryAttemptInOrder() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        doThrow(new QueueTimeoutException(first.getId().toString()))
+                .when(requestPacingService)
+                .acquireSlot(first);
+        when(openAiAdapter.complete(merged, second)).thenReturn(responseWithContent("ok"));
+
+        ChatCompletionResponse out = chatCompletionService.complete("t", "f", userRequest());
+
+        String log = out.getLineage().toLogString();
+        assertTrue(log.contains("routing=feature"), log);
+        assertTrue(log.contains("1:ai-bridge-1-m1/OPENAI=QUEUE_TIMEOUT"), log);
+        assertTrue(log.contains("2:ai-bridge-1-m1/OPENAI=SUCCESS"), log);
+        assertTrue(log.indexOf("QUEUE_TIMEOUT") < log.indexOf("SUCCESS"), log);
+    }
+
+    @Test
+    void chainExhausted_throwsAndStillWalkedEveryConfig() {
+        LlmConfig first = openAiConfig();
+        LlmConfig second = openAiConfig();
+        when(configResolverService.resolveChain(any(), any())).thenReturn(List.of(first, second));
+        ChatCompletionRequest merged = new ChatCompletionRequest();
+        when(parameterMergeService.merge(any(), any())).thenReturn(merged);
+        when(openAiAdapter.complete(merged, first)).thenThrow(new ProviderRateLimitException("429"));
+        when(openAiAdapter.complete(merged, second))
+                .thenThrow(new ProviderUnavailableException("503"));
+
+        assertThrows(
+                ProviderUnavailableException.class,
+                () -> chatCompletionService.complete("t", "f", userRequest()));
+
+        verify(openAiAdapter).complete(merged, first);
+        verify(openAiAdapter).complete(merged, second);
+    }
+
+    private static Usage usage(int prompt, int completion, int total) {
+        Usage u = new Usage();
+        u.setPromptTokens(prompt);
+        u.setCompletionTokens(completion);
+        u.setTotalTokens(total);
+        return u;
+    }
+
     private static ChatCompletionRequest userRequest() {
         ChatMessage m = new ChatMessage();
         m.setRole("user");
@@ -345,6 +634,9 @@ class ChatCompletionServiceTest {
         c.setId(UUID.randomUUID());
         c.setProvider(p);
         c.setModelName("m1");
+        c.setModelSlug("m1");
+        c.setModelSequence(1);
+        c.setGatewayModelName("ai-bridge-1-m1");
         return c;
     }
 
@@ -355,6 +647,9 @@ class ChatCompletionServiceTest {
         c.setId(UUID.randomUUID());
         c.setProvider(p);
         c.setModelName("cb1");
+        c.setModelSlug("cb1");
+        c.setModelSequence(1);
+        c.setGatewayModelName("ai-bridge-1-cb1");
         return c;
     }
 

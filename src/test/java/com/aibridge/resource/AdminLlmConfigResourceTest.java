@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -25,12 +27,14 @@ import com.aibridge.repository.LlmConfigRepository;
 import com.aibridge.repository.LlmProviderRepository;
 import com.aibridge.service.ConfigResolverService;
 import com.aibridge.service.EncryptionService;
+import com.aibridge.service.GatewayModelNameService;
 import com.aibridge.service.LlmValidationService;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -61,6 +65,9 @@ class AdminLlmConfigResourceTest {
 
     @Mock
     EndpointUrlValidator endpointUrlValidator;
+
+    @Mock
+    GatewayModelNameService gatewayModelNameService;
 
     @InjectMocks
     AdminLlmConfigResource adminLlmConfigResource;
@@ -779,5 +786,138 @@ class AdminLlmConfigResourceTest {
 
         verify(encryptionService).encrypt("new-secret");
         assertEquals("new-blob", entity.getCredentialsEncrypted());
+    }
+
+    // =========================================================================
+    // Gateway model identity — two configs of the same model must both persist.
+    // =========================================================================
+
+    @Test
+    void createConfig_assignsGatewayModelNameBeforePersisting() {
+        LlmProvider provider = provider();
+        when(llmProviderRepository.findByIdOptional(any())).thenReturn(Optional.of(provider));
+        when(encryptionService.encrypt(anyString())).thenReturn("enc");
+        when(llmValidationService.validate(any())).thenReturn(validationOk());
+        doAnswer(inv -> {
+            LlmConfig e = inv.getArgument(0);
+            e.setModelSlug("claude-sonnet-6");
+            e.setModelSequence(1);
+            e.setGatewayModelName("ai-bridge-1-claude-sonnet-6");
+            return null;
+        }).when(gatewayModelNameService).assign(any(), eq("claude-sonnet-6"));
+
+        LlmConfigRequest req = request("claude-sonnet-6", provider.getId());
+        Response response = adminLlmConfigResource.createConfig(req);
+
+        assertEquals(201, response.getStatus());
+        LlmConfigResponse body = (LlmConfigResponse) response.getEntity();
+        assertEquals("ai-bridge-1-claude-sonnet-6", body.getGatewayModelName());
+
+        ArgumentCaptor<LlmConfig> captor = ArgumentCaptor.forClass(LlmConfig.class);
+        verify(llmConfigRepository).persist(captor.capture());
+        assertEquals("ai-bridge-1-claude-sonnet-6", captor.getValue().getGatewayModelName());
+    }
+
+    @Test
+    void createConfig_twoConfigsOfTheSameModelBothPersistWithDistinctGatewayNames() {
+        LlmProvider provider = provider();
+        when(llmProviderRepository.findByIdOptional(any())).thenReturn(Optional.of(provider));
+        when(encryptionService.encrypt(anyString())).thenReturn("enc");
+        when(llmValidationService.validate(any())).thenReturn(validationOk());
+
+        AtomicInteger counter = new AtomicInteger();
+        doAnswer(inv -> {
+            LlmConfig e = inv.getArgument(0);
+            int seq = counter.incrementAndGet();
+            e.setModelSlug("claude-sonnet-6");
+            e.setModelSequence(seq);
+            e.setGatewayModelName("ai-bridge-" + seq + "-claude-sonnet-6");
+            return null;
+        }).when(gatewayModelNameService).assign(any(), eq("claude-sonnet-6"));
+
+        Response first = adminLlmConfigResource.createConfig(request("claude-sonnet-6", provider.getId()));
+        Response second = adminLlmConfigResource.createConfig(request("claude-sonnet-6", provider.getId()));
+
+        assertEquals(201, first.getStatus());
+        assertEquals(201, second.getStatus());
+        assertEquals("ai-bridge-1-claude-sonnet-6",
+                ((LlmConfigResponse) first.getEntity()).getGatewayModelName());
+        assertEquals("ai-bridge-2-claude-sonnet-6",
+                ((LlmConfigResponse) second.getEntity()).getGatewayModelName());
+        verify(llmConfigRepository, times(2)).persist(any(LlmConfig.class));
+    }
+
+    @Test
+    void createConfig_doesNotAssignAGatewayNameWhenValidationFails() {
+        LlmProvider provider = provider();
+        when(llmProviderRepository.findByIdOptional(any())).thenReturn(Optional.of(provider));
+        when(encryptionService.encrypt(anyString())).thenReturn("enc");
+        when(llmValidationService.validate(any()))
+                .thenReturn(validationFailed("bad key"));
+
+        Response response = adminLlmConfigResource.createConfig(request("claude-sonnet-6", provider.getId()));
+
+        assertEquals(422, response.getStatus());
+        // A rejected config must not burn a sequence number.
+        verify(gatewayModelNameService, never()).assign(any(), anyString());
+        verify(llmConfigRepository, never()).persist(any(LlmConfig.class));
+    }
+
+    @Test
+    void updateConfig_delegatesToReassignSoUnchangedModelsKeepTheirName() {
+        LlmProvider provider = provider();
+        LlmConfig existing = new LlmConfig();
+        existing.setId(UUID.randomUUID());
+        existing.setProvider(provider);
+        existing.setModelName("claude-sonnet-6");
+        existing.setModelSlug("claude-sonnet-6");
+        existing.setModelSequence(2);
+        existing.setGatewayModelName("ai-bridge-2-claude-sonnet-6");
+        existing.setCredentialsEncrypted("enc");
+
+        when(llmConfigRepository.findByIdOptional(existing.getId())).thenReturn(Optional.of(existing));
+        when(llmProviderRepository.findByIdOptional(any())).thenReturn(Optional.of(provider));
+        when(encryptionService.decrypt("enc")).thenReturn("secret");
+        when(llmValidationService.validate(any())).thenReturn(validationOk());
+
+        LlmConfigRequest req = request("claude-sonnet-6", provider.getId());
+        req.setCredentials("secret");
+
+        Response response = adminLlmConfigResource.updateConfig(existing.getId(), req);
+
+        assertEquals(200, response.getStatus());
+        verify(gatewayModelNameService).reassignIfModelChanged(existing, "claude-sonnet-6");
+        verify(gatewayModelNameService, never()).assign(any(), anyString());
+    }
+
+    private static ValidationResultResponse validationOk() {
+        ValidationResultResponse r = new ValidationResultResponse();
+        r.setValid(true);
+        return r;
+    }
+
+    private static ValidationResultResponse validationFailed(String message) {
+        ValidationResultResponse r = new ValidationResultResponse();
+        r.setValid(false);
+        r.setMessage(message);
+        return r;
+    }
+
+    private static LlmProvider provider() {
+        LlmProvider p = new LlmProvider();
+        p.setId(UUID.randomUUID());
+        p.setName(ProviderName.CLAUDE);
+        p.setAuthType(AuthType.API_KEY);
+        return p;
+    }
+
+    private static LlmConfigRequest request(String modelName, UUID providerId) {
+        LlmConfigRequest req = new LlmConfigRequest();
+        req.setProviderId(providerId);
+        req.setModelName(modelName);
+        req.setEndpointUrl("https://api.anthropic.com/v1/messages");
+        req.setCredentials("sk-test");
+        req.setFeatures(List.of("chat"));
+        return req;
     }
 }

@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -283,9 +285,13 @@ class EndpointUrlValidatorTest {
     }
 
     @Test
-    void hostMatchesAllowlist_patternWithoutStarPrefix_requiresExactLiteral() {
+    void hostMatchesAllowlist_partialLabelWildcardMatchesNothing() {
+        // "*example.com" is a partial-label wildcard, which is not a supported form. It must not
+        // widen to subdomains, and it no longer matches itself either — a hostname cannot legally
+        // contain an asterisk, so the old self-match was an artifact of the literal fallback.
         assertFalse(EndpointUrlValidator.hostMatchesAllowlist("sub.example.com", List.of("*example.com")));
-        assertTrue(EndpointUrlValidator.hostMatchesAllowlist("*example.com", List.of("*example.com")));
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist("example.com", List.of("*example.com")));
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist("*example.com", List.of("*example.com")));
     }
 
     @Test
@@ -339,5 +345,73 @@ class EndpointUrlValidatorTest {
         byte[] addr = new byte[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xff, (byte) 0xff, 10, 0, 0, 1};
         InetAddress a = InetAddress.getByAddress(addr);
         assertTrue(EndpointUrlValidator.isPrivateOrNonRoutable(a));
+    }
+
+    // =========================================================================
+    // Allowlist wildcards. The shipped default includes a mid-label wildcard
+    // (bedrock-runtime.*.amazonaws.com) — every real Bedrock region must match.
+    // =========================================================================
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "bedrock-runtime.us-east-1.amazonaws.com",
+        "bedrock-runtime.eu-west-1.amazonaws.com",
+        "bedrock-runtime.ap-southeast-2.amazonaws.com"
+    })
+    void allowlist_midLabelWildcardMatchesEveryRegion(String host) {
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist(
+                host, List.of("bedrock-runtime.*.amazonaws.com")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "bedrock-runtime.us-east-1.evil.com",
+        "evil.com",
+        "bedrock-runtime.amazonaws.com.evil.com",
+        "prefix-bedrock-runtime.us-east-1.amazonaws.com"
+    })
+    void allowlist_midLabelWildcardDoesNotMatchLookalikes(String host) {
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist(
+                host, List.of("bedrock-runtime.*.amazonaws.com")));
+    }
+
+    @Test
+    void allowlist_wildcardDoesNotCrossDots() {
+        // A single * stands for exactly one label, so an attacker cannot smuggle
+        // extra labels past the pinned suffix.
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist(
+                "bedrock-runtime.a.b.amazonaws.com", List.of("bedrock-runtime.*.amazonaws.com")));
+    }
+
+    @Test
+    void allowlist_leadingWildcardKeepsSubdomainSemantics() {
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist(
+                "us-south.ml.cloud.ibm.com", List.of("*.cloud.ibm.com")));
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist(
+                "cloud.ibm.com", List.of("*.cloud.ibm.com")));
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist(
+                "notcloud.ibm.com", List.of("*.cloud.ibm.com")));
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist(
+                "cloud.ibm.com.evil.net", List.of("*.cloud.ibm.com")));
+    }
+
+    @Test
+    void allowlist_everyShippedDefaultPatternMatchesARealEndpoint() {
+        List<String> shipped = List.of(
+                "api.openai.com", "api.anthropic.com", "api.cerebras.ai",
+                "bedrock-runtime.*.amazonaws.com", "*.cloud.ibm.com");
+
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist("api.openai.com", shipped));
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist("api.anthropic.com", shipped));
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist("api.cerebras.ai", shipped));
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist(
+                "bedrock-runtime.us-east-1.amazonaws.com", shipped));
+        assertTrue(EndpointUrlValidator.hostMatchesAllowlist("us-south.ml.cloud.ibm.com", shipped));
+    }
+
+    @Test
+    void allowlist_bareAsteriskDoesNotMatchEverything() {
+        // A lone "*" would be an accidental allow-all; it must stay inert.
+        assertFalse(EndpointUrlValidator.hostMatchesAllowlist("evil.com", List.of("*")));
     }
 }

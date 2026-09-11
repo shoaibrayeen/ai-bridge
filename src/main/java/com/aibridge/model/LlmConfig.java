@@ -40,6 +40,18 @@ public class LlmConfig extends PanacheEntityBase {
     @Column(name = "model_name", nullable = false)
     private String modelName;
 
+    /** Normalised form of {@link #modelName}, used to partition {@link #modelSequence}. */
+    @Column(name = "model_slug", nullable = false)
+    private String modelSlug;
+
+    /** Counts up per {@link #modelSlug}, so the same model can be registered more than once. */
+    @Column(name = "model_sequence", nullable = false)
+    private Integer modelSequence;
+
+    /** Service-wide unique name, {@code ai-bridge-<sequence>-<slug>}. Clients may route on it. */
+    @Column(name = "gateway_model_name", nullable = false, unique = true)
+    private String gatewayModelName;
+
     @Column(name = "endpoint_url", nullable = false)
     private String endpointUrl;
 
@@ -145,6 +157,30 @@ public class LlmConfig extends PanacheEntityBase {
 
     public String getModelName() {
         return modelName;
+    }
+
+    public String getModelSlug() {
+        return modelSlug;
+    }
+
+    public void setModelSlug(String modelSlug) {
+        this.modelSlug = modelSlug;
+    }
+
+    public Integer getModelSequence() {
+        return modelSequence;
+    }
+
+    public void setModelSequence(Integer modelSequence) {
+        this.modelSequence = modelSequence;
+    }
+
+    public String getGatewayModelName() {
+        return gatewayModelName;
+    }
+
+    public void setGatewayModelName(String gatewayModelName) {
+        this.gatewayModelName = gatewayModelName;
     }
 
     public void setModelName(String modelName) {

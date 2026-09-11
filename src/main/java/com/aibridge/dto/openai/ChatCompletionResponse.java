@@ -1,5 +1,7 @@
 package com.aibridge.dto.openai;
 
+import com.aibridge.dto.lineage.CompletionLineage;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
@@ -70,6 +72,22 @@ public class ChatCompletionResponse {
 
     public void setCreated(Long created) {
         this.created = created;
+    }
+
+    /**
+     * Gateway routing trail for this completion. Populated on every call and always logged;
+     * stripped from the wire response unless the caller sent {@code X-Include-Lineage: true},
+     * so the default payload stays a plain OpenAI response.
+     */
+    @JsonProperty("x_aibridge_lineage")
+    private CompletionLineage lineage;
+
+    public CompletionLineage getLineage() {
+        return lineage;
+    }
+
+    public void setLineage(CompletionLineage lineage) {
+        this.lineage = lineage;
     }
 
     public String getModel() {

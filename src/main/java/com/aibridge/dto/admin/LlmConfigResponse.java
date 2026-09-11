@@ -22,6 +22,10 @@ public class LlmConfigResponse {
     @JsonProperty("model_name")
     private String modelName;
 
+    /** Service-wide unique name clients can send in the OpenAI {@code model} field. */
+    @JsonProperty("gateway_model_name")
+    private String gatewayModelName;
+
     @JsonProperty("endpoint_url")
     private String endpointUrl;
 
@@ -96,6 +100,7 @@ public class LlmConfigResponse {
         r.setTenantId(entity.getTenantId());
         r.setProviderId(entity.getProvider() != null ? entity.getProvider().getId() : null);
         r.setModelName(entity.getModelName());
+        r.setGatewayModelName(entity.getGatewayModelName());
         r.setEndpointUrl(entity.getEndpointUrl());
         r.setCredentials("****");
         r.setRpsLimit(entity.getRpsLimit());
@@ -149,6 +154,14 @@ public class LlmConfigResponse {
 
     public String getModelName() {
         return modelName;
+    }
+
+    public String getGatewayModelName() {
+        return gatewayModelName;
+    }
+
+    public void setGatewayModelName(String gatewayModelName) {
+        this.gatewayModelName = gatewayModelName;
     }
 
     public void setModelName(String modelName) {

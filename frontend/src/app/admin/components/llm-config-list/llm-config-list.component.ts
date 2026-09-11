@@ -35,13 +35,16 @@ import { AdminApiService } from '../../services/admin-api.service';
         <table class="table">
           <thead>
             <tr>
-              <th>Model</th><th>Provider</th><th>Tenant</th><th>Features</th>
+              <th>Gateway model</th><th>Model</th><th>Provider</th><th>Tenant</th><th>Features</th>
               <th>Fallback</th><th>Active</th><th>Priority</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
             @for (c of configs; track c.id) {
               <tr>
+                <td>
+                  <code class="gateway-model" [title]="'Send this in the OpenAI model field to pin a request to this config'">{{ c.gateway_model_name ?? '—' }}</code>
+                </td>
                 <td>{{ c.model_name }}</td>
                 <td>{{ c.provider_name ?? '—' }}</td>
                 <td>{{ c.tenant_id ?? 'Global' }}</td>
@@ -69,7 +72,8 @@ import { AdminApiService } from '../../services/admin-api.service';
     }
   `,
   styles: [`
-    :host { display: block; padding: 1.25rem; max-width: 1100px; }
+    :host { display: block; padding: 1.25rem; max-width: 1240px; }
+    .gateway-model { font-size: 0.82rem; white-space: nowrap; }
     .filters { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
     .filter { display: flex; flex-direction: column; gap: 0.15rem; min-width: 180px; }
     .actions { display: flex; gap: 0.25rem; }

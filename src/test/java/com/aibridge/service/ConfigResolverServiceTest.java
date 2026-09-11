@@ -1,6 +1,7 @@
 package com.aibridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -231,5 +232,83 @@ class ConfigResolverServiceTest {
         cfg.setModelName("gpt-test");
         cfg.setProvider(provider);
         return cfg;
+    }
+
+    // =========================================================================
+    // Gateway model name resolution — DAO mocked.
+    // =========================================================================
+
+    @Test
+    void resolveByGatewayModelName_returnsSingleConfigChain() {
+        LlmConfig cfg = gatewayConfig("acme", "ai-bridge-2-claude-sonnet-6");
+        when(llmConfigRepository.findActiveByGatewayModelName("ai-bridge-2-claude-sonnet-6"))
+                .thenReturn(cfg);
+
+        List<LlmConfig> chain =
+                configResolverService.resolveByGatewayModelName("acme", "ai-bridge-2-claude-sonnet-6");
+
+        // Pinning a model selects exactly one config — failover belongs to feature routing.
+        assertEquals(1, chain.size());
+        assertSame(cfg, chain.get(0));
+    }
+
+    @Test
+    void resolveByGatewayModelName_globalConfigIsAddressableByAnyTenant() {
+        LlmConfig cfg = gatewayConfig(null, "ai-bridge-1-gpt-4o");
+        when(llmConfigRepository.findActiveByGatewayModelName("ai-bridge-1-gpt-4o")).thenReturn(cfg);
+
+        assertEquals(1, configResolverService.resolveByGatewayModelName("acme", "ai-bridge-1-gpt-4o").size());
+        assertEquals(1, configResolverService.resolveByGatewayModelName(null, "ai-bridge-1-gpt-4o").size());
+    }
+
+    @Test
+    void resolveByGatewayModelName_anotherTenantsConfigIsNotAddressable() {
+        LlmConfig cfg = gatewayConfig("other", "ai-bridge-1-gpt-4o");
+        when(llmConfigRepository.findActiveByGatewayModelName("ai-bridge-1-gpt-4o")).thenReturn(cfg);
+
+        assertThrows(
+                ConfigNotFoundException.class,
+                () -> configResolverService.resolveByGatewayModelName("acme", "ai-bridge-1-gpt-4o"));
+    }
+
+    @Test
+    void resolveByGatewayModelName_tenantScopedConfigIsNotAddressableWithoutATenant() {
+        LlmConfig cfg = gatewayConfig("acme", "ai-bridge-1-gpt-4o");
+        when(llmConfigRepository.findActiveByGatewayModelName("ai-bridge-1-gpt-4o")).thenReturn(cfg);
+
+        assertThrows(
+                ConfigNotFoundException.class,
+                () -> configResolverService.resolveByGatewayModelName(null, "ai-bridge-1-gpt-4o"));
+    }
+
+    @Test
+    void resolveByGatewayModelName_unknownNameThrows() {
+        when(llmConfigRepository.findActiveByGatewayModelName("ai-bridge-9-nope")).thenReturn(null);
+
+        assertThrows(
+                ConfigNotFoundException.class,
+                () -> configResolverService.resolveByGatewayModelName("acme", "ai-bridge-9-nope"));
+    }
+
+    @Test
+    void resolveByGatewayModelName_doesNotTouchTheConfigCache() {
+        LlmConfig cfg = gatewayConfig("acme", "ai-bridge-1-gpt-4o");
+        when(llmConfigRepository.findActiveByGatewayModelName("ai-bridge-1-gpt-4o")).thenReturn(cfg);
+
+        configResolverService.resolveByGatewayModelName("acme", "ai-bridge-1-gpt-4o");
+
+        // The 5-minute chain cache is keyed by tenant+feature; a pinned lookup must not read
+        // or write it, or a stale chain could shadow a freshly edited config.
+        verify(cacheProvider, never()).get(anyString());
+        verify(cacheProvider, never()).setex(anyString(), anyLong(), anyString());
+    }
+
+    private static LlmConfig gatewayConfig(String tenantId, String gatewayModelName) {
+        LlmConfig c = new LlmConfig();
+        c.setId(UUID.randomUUID());
+        c.setTenantId(tenantId);
+        c.setGatewayModelName(gatewayModelName);
+        c.setActive(true);
+        return c;
     }
 }
